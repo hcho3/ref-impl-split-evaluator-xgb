@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 project(reference_split_evaluator VERSION 0.0.1 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 20)
-
 add_executable(reference_split_evaluator)
 target_sources(reference_split_evaluator PRIVATE main.cc param.h evaluator.h iterator.h scan.h
         reduce.h helpers.h evaluator.cc)
