@@ -7,10 +7,7 @@
 template <typename T, int increment>
 class CountingIterator {
  public:
-  explicit CountingIterator(T init) : cur_(init), init_(init) {}
-  void Reset() {
-    cur_ = init_;
-  }
+  explicit CountingIterator(T init) : cur_(init) {}
   T Next() {
     T ret = cur_;
     cur_ += increment;
@@ -19,16 +16,12 @@ class CountingIterator {
 
  private:
   T cur_;
-  T init_;
 };
 
 template <typename InputIterT, typename FuncT, typename TransformedOutputT>
 class TransformIterator {
  public:
   TransformIterator(InputIterT begin, FuncT func) : input_iter_(begin), func_(func) {}
-  void Reset() {
-    input_iter_.Reset();
-  }
   TransformedOutputT Next() {
     return func_(input_iter_.Next());
   }
@@ -44,10 +37,6 @@ class ZipIterator {
  public:
   ZipIterator(FirstInputIterT first_begin, SecondInputIterT second_begin)
       : first_input_iter_(first_begin), second_input_iter_(second_begin) {}
-  void Reset() {
-    first_input_iter_.Reset();
-    second_input_iter_.Reset();
-  }
   std::tuple<FirstOutputT, SecondOutputT> Next() {
     return std::make_tuple(first_input_iter_.Next(), second_input_iter_.Next());
   }
@@ -62,16 +51,12 @@ class OutputIterator {
  public:
   using OutputT =
       std::remove_reference_t<std::invoke_result_t<decltype(&IteratorT::operator*), IteratorT>>;
-  explicit OutputIterator(IteratorT begin) : init_(begin), cur_(begin) {}
-  void Reset() {
-    cur_ = init_;
-  }
+  explicit OutputIterator(IteratorT begin) : cur_(begin) {}
   void Next(OutputT e) {
     *(cur_++) = e;
   }
 
  private:
-  IteratorT init_;
   IteratorT cur_;
 };
 
@@ -80,7 +65,6 @@ class DiscardIterator {
  public:
   using OutputT = Tu;
   DiscardIterator() = default;
-  void Reset() {}
   template <typename DummyT>
   void Next(DummyT) {}
 };
@@ -90,9 +74,6 @@ class TransformOutputIterator {
  public:
   using OutputT = typename OutputIterT::OutputT;
   TransformOutputIterator(OutputIterT begin, FuncT func) : output_iter_(begin), func_(func) {}
-  void Reset() {
-    output_iter_.Reset();
-  }
   void Next(OutputT e) {
     output_iter_.Next(func_(e));
   }
