@@ -4,6 +4,20 @@
 #include <tuple>
 #include <type_traits>
 
+template <typename IteratorT>
+class InputIterator {   // light wrapper around std InputIterator
+ public:
+  using OutputT =
+      std::remove_reference_t<std::invoke_result_t<decltype(&IteratorT::operator*), IteratorT>>;
+  explicit InputIterator(IteratorT begin) : cur_(begin) {}
+  OutputT Next() {
+    return *(cur_++);
+  }
+
+ private:
+  IteratorT cur_;
+};
+
 template <typename T, int increment>
 class CountingIterator {
  public:
@@ -47,7 +61,7 @@ class ZipIterator {
 };
 
 template <typename IteratorT>
-class OutputIterator {
+class OutputIterator {   // light wrapper around std OutputIterator
  public:
   using OutputT =
       std::remove_reference_t<std::invoke_result_t<decltype(&IteratorT::operator*), IteratorT>>;
