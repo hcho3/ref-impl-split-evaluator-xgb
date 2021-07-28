@@ -66,6 +66,19 @@ struct EvaluateSplitsHistEntry {
   friend std::ostream& operator<<(std::ostream& os, const EvaluateSplitsHistEntry& m);
 };
 
+struct SplitCandidate {
+  float loss_chg{std::numeric_limits<float>::lowest()};
+  DefaultDirection dir{kLeftDir};
+  int findex{-1};
+  float fvalue{0};
+  bool is_cat{false};
+
+  GradStats left_sum, right_sum;
+
+  friend std::ostream& operator<<(std::ostream& os, const SplitCandidate& m);
+  bool Update(const SplitCandidate& other, const TrainingParam& param);
+};
+
 struct ScanComputedElem {
   GradStats left_sum{0.0, 0.0};
   GradStats right_sum{0.0, 0.0};
@@ -128,5 +141,9 @@ struct WriteScan {
 std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
                                                                      EvaluateSplitInputs left,
                                                                      EvaluateSplitInputs right);
+void EvaluateSplits(std::span<SplitCandidate> out_splits,
+                    SplitEvaluator evaluator,
+                    EvaluateSplitInputs left,
+                    EvaluateSplitInputs right);
 
 #endif  // EVALUATOR_H_

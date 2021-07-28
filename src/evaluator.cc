@@ -1,8 +1,48 @@
 #include "evaluator.h"
 #include "helpers.h"
 #include "scan.h"
+#include "reduce.h"
 #include <ostream>
 #include <string>
+
+void EvaluateSplits(std::span<SplitCandidate> out_splits,
+                    SplitEvaluator evaluator,
+                    EvaluateSplitInputs left,
+                    EvaluateSplitInputs right) {
+  auto l_n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
+  auto r_n_features = right.feature_segments.empty() ? 0 : right.feature_segments.size() - 1;
+  if (!(r_n_features == 0 || l_n_features == r_n_features)) {
+    throw std::runtime_error("");
+  }
+
+  auto out_scan = EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);
+
+  auto reduce_key = MakeTransformIterator(
+      MakeForwardCountingIterator<bst_feature_t>(0),
+      [=] (bst_feature_t i) -> int {
+        if (i < l_n_features) {
+          return 0;  // left node
+        } else {
+          return 1;  // right node
+        }
+      });
+  auto reduce_val = MakeTransformIterator(
+      MakeForwardCountingIterator<std::size_t>(0),
+      [&out_scan, &left](std::size_t i) {
+        ScanComputedElem c = out_scan.at(i);
+        bool is_cat = IsCat(left.feature_types, c.best_findex);
+        return SplitCandidate{c.best_loss_chg, c.best_direction, c.best_findex,
+                              c.best_fvalue, is_cat, c.left_sum, c.right_sum};
+      });
+  ReduceByKey(
+      reduce_key, out_scan.size(), reduce_val, DiscardIterator<int>(),
+      OutputIterator(out_splits.begin(), out_splits.end()),
+      [](int a, int b) { return (a == b); },
+      [=](SplitCandidate l, SplitCandidate r) {
+        l.Update(r, left.param);
+        return l;
+      });
+}
 
 std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
                                                                      EvaluateSplitInputs left,
@@ -197,6 +237,17 @@ WriteScan::operator() (std::tuple<ScanElem, ScanElem> e) {
   return {};  // discard
 }
 
+bool
+SplitCandidate::Update(const SplitCandidate& other, const TrainingParam& param) {
+  if (other.loss_chg > loss_chg &&
+      other.left_sum.sum_hess >= param.min_child_weight &&
+      other.right_sum.sum_hess >= param.min_child_weight) {
+    *this = other;
+    return true;
+  }
+  return false;
+}
+
 std::ostream& operator<<(std::ostream& os, const EvaluateSplitsHistEntry& m) {
   std::string indicator_str =
       (m.indicator == ChildNodeIndicator::kLeftChild) ? "kLeftChild" : "kRightChild";
@@ -227,5 +278,13 @@ std::ostream& operator<<(std::ostream& os, const ScanElem& m) {
     os << ", computed_result: " << m.computed_result;
   }
   os << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const SplitCandidate& m) {
+  std::string dir_s = (m.dir == kLeftDir) ? "left" : "right";
+  os << "(loss_chg: " << m.loss_chg << ", dir: " << dir_s << ", findex: " << m.findex
+     << ", fvalue: " << m.fvalue << ", is_cat: " << m.is_cat << ", left_sum: " << m.left_sum
+     << ", right_sum: " << m.right_sum << ")";
   return os;
 }

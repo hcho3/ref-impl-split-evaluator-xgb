@@ -143,3 +143,29 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   EXPECT_FLOAT_EQ(out_scan[3].right_sum.sum_grad, 0.5);
   EXPECT_FLOAT_EQ(out_scan[3].right_sum.sum_hess, 0.5);
 }
+
+TEST(EvaluateSplits, E2ETreeStump) {
+  EvaluateSplitsExample example;
+  auto [left, right] = GetTreeStumpExample(example);
+  std::vector<SplitCandidate> out_splits(2);
+  SplitEvaluator evaluator;
+  EvaluateSplits(ToSpan(out_splits), evaluator, left, right);
+
+  if (g_verbose_flag) {
+    for (SplitCandidate e : out_splits) {
+      std::cout << e << std::endl;
+    }
+  }
+
+  SplitCandidate result_left = out_splits[0];
+  EXPECT_EQ(result_left.findex, 1);
+  EXPECT_EQ(result_left.fvalue, 11.0f);
+  EXPECT_EQ(result_left.dir, DefaultDirection::kRightDir);
+  EXPECT_FLOAT_EQ(result_left.loss_chg, 4.0f);
+
+  SplitCandidate result_right = out_splits[1];
+  EXPECT_EQ(result_right.findex, 0);
+  EXPECT_EQ(result_right.fvalue, 2.0f);
+  EXPECT_EQ(result_right.dir, DefaultDirection::kLeftDir);
+  EXPECT_FLOAT_EQ(result_right.loss_chg, 4.0f);
+}
