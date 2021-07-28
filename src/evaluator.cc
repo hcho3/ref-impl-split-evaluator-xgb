@@ -183,24 +183,11 @@ ScanOp::DoIt(ScanElem lhs, ScanElem rhs) {
       left.param, nidx, lhs.findex, left_sum, right_sum);
   float parent_gain = evaluator.CalcGain(left.param, parent_sum);
   float loss_chg = gain - parent_gain;
-  if (loss_chg > lhs.computed_result.best_loss_chg) {
-    ret.computed_result.best_loss_chg = loss_chg;
-    ret.computed_result.best_findex = lhs.findex;
-    ret.computed_result.best_fvalue = lhs.fvalue;
-    ret.computed_result.best_direction =
-        (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir);
-    ret.computed_result.left_sum = left_sum;
-    ret.computed_result.right_sum = right_sum;
-    ret.computed_result.parent_sum = parent_sum;
-  } else {
-    ret.computed_result.best_loss_chg = lhs.computed_result.best_loss_chg;
-    ret.computed_result.best_findex = lhs.computed_result.best_findex;
-    ret.computed_result.best_fvalue = lhs.computed_result.best_fvalue;
-    ret.computed_result.best_direction = lhs.computed_result.best_direction;
-    ret.computed_result.left_sum = lhs.computed_result.left_sum;
-    ret.computed_result.right_sum = lhs.computed_result.right_sum;
-    ret.computed_result.parent_sum = lhs.computed_result.parent_sum;
-  }
+  ret.computed_result = lhs.computed_result;
+  ret.computed_result.Update(left_sum, right_sum, parent_sum,
+                             loss_chg, lhs.findex, lhs.fvalue,
+                             (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir),
+                             left.param);
   return ret;
 }
 
@@ -235,6 +222,30 @@ WriteScan::operator() (std::tuple<ScanElem, ScanElem> e) {
   DoIt<true>(fw);
   DoIt<false>(bw);
   return {};  // discard
+}
+
+bool
+ScanComputedElem::Update(GradStats left_sum_in,
+                         GradStats right_sum_in,
+                         GradStats parent_sum_in,
+                         float loss_chg_in,
+                         int32_t findex_in,
+                         float fvalue_in,
+                         DefaultDirection dir_in,
+                         const TrainingParam& param) {
+  if (loss_chg_in > best_loss_chg &&
+      left_sum_in.sum_hess >= param.min_child_weight &&
+      right_sum_in.sum_hess >= param.min_child_weight) {
+    best_loss_chg = loss_chg_in;
+    best_findex = findex_in;
+    best_fvalue = fvalue_in;
+    best_direction = dir_in;
+    left_sum = left_sum_in;
+    right_sum = right_sum_in;
+    parent_sum = parent_sum_in;
+    return true;
+  }
+  return false;
 }
 
 bool

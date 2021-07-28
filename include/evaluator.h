@@ -89,6 +89,14 @@ struct ScanComputedElem {
   DefaultDirection best_direction{DefaultDirection::kLeftDir};
 
   friend std::ostream& operator<<(std::ostream& os, const ScanComputedElem& m);
+  bool Update(GradStats left_sum_in,
+              GradStats right_sum_in,
+              GradStats parent_sum_in,
+              float loss_chg_in,
+              int32_t findex_in,
+              float fvalue_in,
+              DefaultDirection dir_in,
+              const TrainingParam& param);
 };
 
 struct ScanElem {
