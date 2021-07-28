@@ -1,6 +1,7 @@
 #ifndef ITERATOR_H_
 #define ITERATOR_H_
 
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 
@@ -9,23 +10,31 @@ class InputIterator {   // light wrapper around std InputIterator
  public:
   using OutputT =
       std::remove_reference_t<std::invoke_result_t<decltype(&IteratorT::operator*), IteratorT>>;
-  explicit InputIterator(IteratorT begin) : cur_(begin) {}
-  OutputT Next() {
-    return *(cur_++);
+  explicit InputIterator(IteratorT begin, IteratorT end) : cur_(begin), end_(end) {}
+  OutputT Get() {
+    if (cur_ == end_) {
+      throw std::out_of_range("Attempting to access beyond the last element");
+    }
+    return *cur_;
+  }
+  void Next() {
+    ++cur_;
   }
 
  private:
   IteratorT cur_;
+  IteratorT end_;
 };
 
 template <typename T, int increment>
 class CountingIterator {
  public:
   explicit CountingIterator(T init) : cur_(init) {}
-  T Next() {
-    T ret = cur_;
+  T Get() {
+    return cur_;
+  }
+  void Next() {
     cur_ += increment;
-    return ret;
   }
 
  private:
@@ -36,8 +45,11 @@ template <typename InputIterT, typename FuncT, typename TransformedOutputT>
 class TransformIterator {
  public:
   TransformIterator(InputIterT begin, FuncT func) : input_iter_(begin), func_(func) {}
-  TransformedOutputT Next() {
-    return func_(input_iter_.Next());
+  TransformedOutputT Get() {
+    return func_(input_iter_.Get());
+  }
+  void Next() {
+    input_iter_.Next();
   }
 
  private:
@@ -51,8 +63,12 @@ class ZipIterator {
  public:
   ZipIterator(FirstInputIterT first_begin, SecondInputIterT second_begin)
       : first_input_iter_(first_begin), second_input_iter_(second_begin) {}
-  std::tuple<FirstOutputT, SecondOutputT> Next() {
-    return std::make_tuple(first_input_iter_.Next(), second_input_iter_.Next());
+  std::tuple<FirstOutputT, SecondOutputT> Get() {
+    return std::make_tuple(first_input_iter_.Get(), second_input_iter_.Get());
+  }
+  void Next() {
+    first_input_iter_.Next();
+    second_input_iter_.Next();
   }
 
  private:
@@ -65,13 +81,20 @@ class OutputIterator {   // light wrapper around std OutputIterator
  public:
   using OutputT =
       std::remove_reference_t<std::invoke_result_t<decltype(&IteratorT::operator*), IteratorT>>;
-  explicit OutputIterator(IteratorT begin) : cur_(begin) {}
-  void Next(OutputT e) {
-    *(cur_++) = e;
+  OutputIterator(IteratorT begin, IteratorT end) : cur_(begin), end_(end) {}
+  void Set(OutputT e) {
+    if (cur_ == end_) {
+      throw std::out_of_range("Attempting to access beyond the last element");
+    }
+    *cur_ = e;
+  }
+  void Next() {
+    ++cur_;
   }
 
  private:
   IteratorT cur_;
+  IteratorT end_;
 };
 
 template <typename Tu>
@@ -80,7 +103,8 @@ class DiscardIterator {
   using OutputT = Tu;
   DiscardIterator() = default;
   template <typename DummyT>
-  void Next(DummyT) {}
+  void Set(DummyT) {}
+  void Next() {}
 };
 
 template <typename OutputIterT, typename FuncT>
@@ -88,8 +112,11 @@ class TransformOutputIterator {
  public:
   using OutputT = typename OutputIterT::OutputT;
   TransformOutputIterator(OutputIterT begin, FuncT func) : output_iter_(begin), func_(func) {}
-  void Next(OutputT e) {
-    output_iter_.Next(func_(e));
+  void Set(OutputT e) {
+    output_iter_.Set(func_(e));
+  }
+  void Next() {
+    output_iter_.Next();
   }
 
  private:
@@ -115,7 +142,7 @@ BackwardCountingIterator<T> MakeBackwardCountingIterator(T init) {
 
 template <typename InputIterT, typename FuncT>
 decltype(auto) MakeTransformIterator(InputIterT begin, FuncT func) {
-  using OutputT = std::invoke_result_t<decltype(&InputIterT::Next), InputIterT>;
+  using OutputT = std::invoke_result_t<decltype(&InputIterT::Get), InputIterT>;
   using TransformedOutputT = std::invoke_result_t<FuncT, OutputT>;
   return TransformIterator<InputIterT, FuncT, TransformedOutputT>(begin, func);
 }
@@ -127,8 +154,8 @@ decltype(auto) MakeTransformOutputIterator(OutputIterT begin, FuncT func) {
 
 template <typename FirstInputIterT, typename SecondInputIterT>
 decltype(auto) MakeZipIterator(FirstInputIterT first_begin, SecondInputIterT second_begin) {
-  using FirstOutputT = std::invoke_result_t<decltype(&FirstInputIterT::Next), FirstInputIterT>;
-  using SecondOutputT = std::invoke_result_t<decltype(&SecondInputIterT::Next), SecondInputIterT>;
+  using FirstOutputT = std::invoke_result_t<decltype(&FirstInputIterT::Get), FirstInputIterT>;
+  using SecondOutputT = std::invoke_result_t<decltype(&SecondInputIterT::Get), SecondInputIterT>;
   return ZipIterator<FirstInputIterT, SecondInputIterT, FirstOutputT, SecondOutputT>(
       first_begin, second_begin);
 }

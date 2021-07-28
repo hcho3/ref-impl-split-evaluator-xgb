@@ -14,9 +14,10 @@ TEST(Iterator, InputIterator) {
   std::mt19937 gen(std::random_device{}());
   std::generate_n(vec.begin(), size, [&]() { return unif(gen); });
 
-  auto iter = InputIterator(vec.begin());
+  auto iter = InputIterator(vec.begin(), vec.end());
   for (std::size_t i = 0; i < size; ++i) {
-    EXPECT_EQ(iter.Next(), vec.at(i));
+    EXPECT_EQ(iter.Get(), vec.at(i));
+    iter.Next();
   }
 }
 
@@ -24,11 +25,13 @@ TEST(Iterator, CountingIterator) {
   constexpr int32_t init = 5;
   auto for_counting = MakeForwardCountingIterator<int32_t>(init);
   for (int i = 0; i < 100; ++i) {
-    EXPECT_EQ(for_counting.Next(), init + static_cast<int32_t>(i));
+    EXPECT_EQ(for_counting.Get(), init + static_cast<int32_t>(i));
+    for_counting.Next();
   }
   auto rev_counting = MakeBackwardCountingIterator<int32_t>(init);
   for (int i = 0; i < 100; ++i) {
-    EXPECT_EQ(rev_counting.Next(), init - static_cast<int32_t>(i));
+    EXPECT_EQ(rev_counting.Get(), init - static_cast<int32_t>(i));
+    rev_counting.Next();
   }
 }
 
@@ -39,7 +42,8 @@ TEST(Iterator, TransformIterator) {
   auto transform_iter = MakeTransformIterator(for_counting,
                                               [](int32_t x) { return x * 100 % 15; });
   for (int i = 0; i < 100; ++i) {
-    EXPECT_EQ(transform_iter.Next(), (init + static_cast<int32_t>(i)) * 100 % 15);
+    EXPECT_EQ(transform_iter.Get(), (init + static_cast<int32_t>(i)) * 100 % 15);
+    transform_iter.Next();
   }
 }
 
@@ -48,9 +52,10 @@ TEST(Iterator, ZipIterator) {
   auto rev_counting = MakeBackwardCountingIterator<int32_t>(100);
   auto zip_iter = MakeZipIterator(for_counting, rev_counting);
   for (int i = 0; i < 200; ++i) {
-    auto [x, y] = zip_iter.Next();
+    auto [x, y] = zip_iter.Get();
     EXPECT_EQ(x, static_cast<int32_t>(i));
     EXPECT_EQ(y, static_cast<int32_t>(100 - i));
+    zip_iter.Next();
   }
 }
 
@@ -63,9 +68,10 @@ TEST(Iterator, OutputIterator) {
   std::mt19937 gen(std::random_device{}());
   std::generate_n(expected_vec.begin(), size, [&]() { return unif(gen); });
 
-  auto out_iter = OutputIterator(vec.begin());
+  auto out_iter = OutputIterator(vec.begin(), vec.end());
   for (std::size_t i = 0; i < size; ++i) {
-    out_iter.Next(expected_vec.at(i));
+    out_iter.Set(expected_vec.at(i));
+    out_iter.Next();
   }
   for (std::size_t i = 0; i < size; ++i) {
     EXPECT_EQ(vec.at(i), expected_vec.at(i));
@@ -81,11 +87,12 @@ TEST(Iterator, TransformOutputIterator) {
   std::mt19937 gen(std::random_device{}());
   std::generate_n(vec2.begin(), size, [&]() { return unif(gen); });
 
-  auto out_iter = OutputIterator(vec.begin());
+  auto out_iter = OutputIterator(vec.begin(), vec.end());
   auto transform_func = [](double x) { return 2 * x - 1.0; };
   auto transform_iter = MakeTransformOutputIterator(out_iter, transform_func);
   for (std::size_t i = 0; i < size; ++i) {
-    transform_iter.Next(vec2.at(i));
+    transform_iter.Set(vec2.at(i));
+    transform_iter.Next();
   }
   for (std::size_t i = 0; i < size; ++i) {
     EXPECT_FLOAT_EQ(vec.at(i), transform_func(vec2.at(i)));
@@ -104,8 +111,8 @@ TEST(Iterator, Combination) {
 
   auto for_counting = MakeForwardCountingIterator<int32_t>(0);
   auto rev_counting = MakeBackwardCountingIterator<int32_t>(10);
-  auto for_iter = InputIterator(vec.begin());
-  auto rev_iter = InputIterator(vec2.begin());
+  auto for_iter = InputIterator(vec.begin(), vec.end());
+  auto rev_iter = InputIterator(vec2.begin(), vec2.end());
   auto for_zip_iter = MakeZipIterator(for_counting, for_iter);
   auto rev_zip_iter = MakeZipIterator(rev_counting, rev_iter);
   auto for_value_iter = MakeTransformIterator(
@@ -120,10 +127,11 @@ TEST(Iterator, Combination) {
       });
   auto zip_iter = MakeZipIterator(for_value_iter, rev_value_iter);
   for (std::size_t i = 0; i < size; ++i) {
-    auto [x, y] = zip_iter.Next();
+    auto [x, y] = zip_iter.Get();
     EXPECT_EQ(std::get<0>(x), static_cast<int32_t>(i) * 10);
     EXPECT_FLOAT_EQ(std::get<1>(x), 50 - vec.at(i) * 30);
     EXPECT_EQ(std::get<0>(y), (10 - static_cast<int32_t>(i)) * 10);
     EXPECT_FLOAT_EQ(std::get<1>(y), 60 - vec2.at(i) * 15);
+    zip_iter.Next();
   }
 }

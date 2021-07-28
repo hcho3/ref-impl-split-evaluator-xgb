@@ -9,8 +9,8 @@ TEST(Scan, InclusiveScan) {
   {
     std::vector<int> vec{1, 0, 2, 2, 1, 3};
     std::vector<int> out(vec.size());
-    auto iter = InputIterator(vec.begin());
-    auto out_iter = OutputIterator(out.begin());
+    auto iter = InputIterator(vec.begin(), vec.end());
+    auto out_iter = OutputIterator(out.begin(), out.end());
     auto scan_op = [](int x, int y) {
       return x + y;
     };
@@ -22,8 +22,8 @@ TEST(Scan, InclusiveScan) {
   {
     std::vector<int> vec{-5, 0, 2, -3, 2, 4, 0, -1, 2, 8};
     std::vector<int> out(vec.size());
-    auto iter = InputIterator(vec.begin());
-    auto out_iter = OutputIterator(out.begin());
+    auto iter = InputIterator(vec.begin(), vec.end());
+    auto out_iter = OutputIterator(out.begin(), out.end());
     auto scan_op = [](int x, int y) {
       return std::max(x, y);
     };
@@ -57,8 +57,9 @@ TEST(Scan, InclusiveScanWithTuples) {
   };
   std::vector<SimpleSplitCandidate> out(vec.size());
   auto for_count_iter = MakeForwardCountingIterator(0);
-  auto for_iter = MakeTransformIterator(for_count_iter, [&](std::size_t idx) { return vec[idx]; });
-  auto out_iter = OutputIterator(out.begin());
+  auto for_iter = MakeTransformIterator(for_count_iter,
+                                        [&vec](std::size_t idx) { return vec.at(idx); });
+  auto out_iter = OutputIterator(out.begin(), out.end());
   auto scan_op = [](SimpleSplitCandidate x, SimpleSplitCandidate y) {
     if (x.loss_chg > y.loss_chg) {
       return x;
@@ -86,12 +87,12 @@ TEST(Scan, InclusiveScanWithTuplesForwardBackward) {
   };
   std::vector<std::tuple<SimpleSplitCandidate, SimpleSplitCandidate>> out(vec.size());
   auto for_count_iter = MakeForwardCountingIterator(0);
-  auto access_fn = [&vec](std::size_t idx) { return vec[idx]; };
+  auto access_fn = [&vec](std::size_t idx) { return vec.at(idx); };
   auto for_iter = MakeTransformIterator(for_count_iter, access_fn);
   auto rev_count_iter = MakeBackwardCountingIterator(vec.size() - 1);
   auto rev_iter = MakeTransformIterator(rev_count_iter, access_fn);
   auto zip_iter = MakeZipIterator(for_iter, rev_iter);
-  auto out_iter = OutputIterator(out.begin());
+  auto out_iter = OutputIterator(out.begin(), out.end());
   auto inner_scan_op = [](SimpleSplitCandidate x, SimpleSplitCandidate y) {
     if (x.loss_chg > y.loss_chg) {
       return x;

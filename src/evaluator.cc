@@ -279,7 +279,7 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
 
   auto value_iter = MakeZipIterator(for_value_iter, rev_value_iter);
   static_assert(std::is_same_v<
-      std::invoke_result_t<decltype(&decltype(value_iter)::Next), decltype(value_iter)>,
+      std::invoke_result_t<decltype(&decltype(value_iter)::Get), decltype(value_iter)>,
       std::tuple<ScanElem, ScanElem>>);
   std::vector<ScanElem> out_scan(n_features * 2);
 
@@ -306,7 +306,7 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
       });
   ReduceByKey(
       reduce_key, out_scan.size(),
-      reduce_val, DiscardIterator<int>(), OutputIterator(out_splits.begin()),
+      reduce_val, DiscardIterator<int>(), OutputIterator(out_splits.begin(), out_splits.end()),
       [](int a, int b) { return (a == b); },
       [=](SplitCandidate l, SplitCandidate r) {
         l.Update(r, left.param);
