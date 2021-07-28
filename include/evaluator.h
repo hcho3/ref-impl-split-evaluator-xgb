@@ -12,96 +12,6 @@ inline static T Sqr(T a) {
   return a * a;
 }
 
-struct EvaluateSplitInputs {
-  int nidx;
-  GradientPair parent_sum;
-  TrainingParam param;
-  std::span<const bst_feature_t> feature_set;
-  std::span<FeatureType const> feature_types;
-  std::span<const uint32_t> feature_segments;
-  std::span<const float> feature_values;
-  std::span<const float> min_fvalue;
-  std::span<const GradientPair> gradient_histogram;
-};
-
-struct SplitCandidate {
-  float loss_chg{std::numeric_limits<float>::lowest()};
-  DefaultDirection dir{kLeftDir};
-  int findex{-1};
-  float fvalue{0};
-  bool is_cat{false};
-
-  GradientPair left_sum;
-  GradientPair right_sum;
-
-  friend auto operator<<(std::ostream& os, SplitCandidate const& m) -> std::ostream& {
-    std::string dir_s = (m.dir == kLeftDir) ? "left" : "right";
-    os << "(loss_chg: " << m.loss_chg << ", dir: " << dir_s << ", findex: " << m.findex
-       << ", fvalue: " << m.fvalue << ", is_cat: " << m.is_cat << ", left_sum: " << m.left_sum
-       << ", right_sum: " << m.right_sum << ")";
-    return os;
-  }
-
-  bool Update(const SplitCandidate& other, const TrainingParam& param) {
-    if (other.loss_chg > loss_chg &&
-        other.left_sum.hess_ >= param.min_child_weight &&
-        other.right_sum.hess_ >= param.min_child_weight) {
-      *this = other;
-      return true;
-    }
-    return false;
-  }
-
-  bool Update(float loss_chg_in, DefaultDirection dir_in,
-              float fvalue_in, int findex_in,
-              GradientPair left_sum_in,
-              GradientPair right_sum_in,
-              bool cat,
-              const TrainingParam& param) {
-    if (loss_chg_in > loss_chg &&
-        left_sum_in.hess_ >= param.min_child_weight &&
-        right_sum_in.hess_ >= param.min_child_weight) {
-      loss_chg = loss_chg_in;
-      dir = dir_in;
-      fvalue = fvalue_in;
-      is_cat = cat;
-      left_sum = left_sum_in;
-      right_sum = right_sum_in;
-      findex = findex_in;
-      return true;
-    }
-    return false;
-  }
-};
-
-struct SplitEvaluator {
-  double CalcSplitGain(const TrainingParam& param, bst_node_t,
-                       bst_feature_t,
-                       GradStats const& left,
-                       GradStats const& right) const {
-    double gain = CalcGain(param, left) + CalcGain(param, right);
-    return gain;
-  }
-
-  double CalcGain(const TrainingParam&, const GradStats& stats) const {
-    if (stats.sum_hess <= 0) {
-      return 0.0;
-    }
-    return Sqr(stats.sum_grad) / stats.sum_hess;
-  }
-};
-
-struct ScanElem {
-  std::size_t idx;
-  GradientPair grad;
-  SplitCandidate candidate;
-
-  friend auto operator<<(std::ostream& os, ScanElem const& m) -> std::ostream& {
-    os << "(idx: " << m.idx << ", grad: " << m.grad << ", candidate: " << m.candidate << ")";
-    return os;
-  }
-};
-
 template <typename IteratorT>
 inline std::size_t SegmentId(IteratorT first, IteratorT last, std::size_t idx) {
   return std::upper_bound(first, last, idx) - 1 - first;
@@ -116,66 +26,107 @@ inline bool IsCat(std::span<FeatureType const> ft, bst_feature_t fidx) {
   return !ft.empty() && ft[fidx] == FeatureType::kCategorical;
 }
 
-template <bool forward>
+struct EvaluateSplitInputs {
+  int nidx;
+  GradientPair parent_sum;
+  TrainingParam param;
+  std::span<const bst_feature_t> feature_set;
+  std::span<FeatureType const> feature_types;
+  std::span<const uint32_t> feature_segments;
+  std::span<const float> feature_values;
+  std::span<const float> min_fvalue;
+  std::span<const GradientPair> gradient_histogram;
+};
+
+struct SplitEvaluator {
+  double CalcSplitGain(const TrainingParam& param, bst_node_t,
+                       bst_feature_t,
+                       const GradStats& left,
+                       const GradStats& right) const {
+    double gain = CalcGain(param, left) + CalcGain(param, right);
+    return gain;
+  }
+
+  double CalcGain(const TrainingParam&, const GradStats& stats) const {
+    if (stats.sum_hess <= 0) {
+      return 0.0;
+    }
+    return Sqr(stats.sum_grad) / stats.sum_hess;
+  }
+};
+
+enum class ChildNodeIndicator : int8_t {
+  kLeftChild, kRightChild
+};
+
+struct EvaluateSplitsHistEntry {
+  ChildNodeIndicator indicator;
+  uint64_t hist_idx;
+
+  friend std::ostream& operator<<(std::ostream& os, const EvaluateSplitsHistEntry& m);
+};
+
+struct ScanComputedElem {
+  GradStats left_sum{0.0, 0.0};
+  GradStats right_sum{0.0, 0.0};
+  GradStats parent_sum{0.0, 0.0};
+  float best_loss_chg{std::numeric_limits<float>::lowest()};
+  int32_t best_findex{-1};
+  float best_fvalue{std::numeric_limits<float>::quiet_NaN()};
+  DefaultDirection best_direction{DefaultDirection::kLeftDir};
+
+  friend std::ostream& operator<<(std::ostream& os, const ScanComputedElem& m);
+};
+
+struct ScanElem {
+  bool valid_entry{true};  // FIXME: Delete -- only relevant for pretty-printing
+  ChildNodeIndicator indicator{ChildNodeIndicator::kLeftChild};
+  uint64_t hist_idx;
+  GradientPair gpair{0.0, 0.0};
+  int32_t findex{-1};
+  float fvalue{std::numeric_limits<float>::quiet_NaN()};
+  bool is_cat{false};
+  bool computed{false};  // FIXME: Delete -- only relevant for pretty-printing
+  ScanComputedElem computed_result{};
+
+  friend std::ostream& operator<<(std::ostream& os, const ScanElem& m);
+};
+
 struct ScanValueOp {
   EvaluateSplitInputs left;
   EvaluateSplitInputs right;
   SplitEvaluator evaluator;
 
-  ScanElem operator()(std::size_t idx);
+  template <bool forward>
+  ScanElem MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
+                                                EvaluateSplitInputs split_input);
+  std::tuple<ScanElem, ScanElem> operator()(
+      std::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup);
 };
 
 struct ScanOp {
-  EvaluateSplitInputs left;
-  EvaluateSplitInputs right;
+  EvaluateSplitInputs left, right;
   SplitEvaluator evaluator;
 
-  ScanOp(EvaluateSplitInputs l, EvaluateSplitInputs r, SplitEvaluator e)
-      : left(std::move(l)), right(std::move(r)), evaluator(std::move(e)) {}
-
-  template <bool forward, bool is_cat>
-  SplitCandidate DoIt(EvaluateSplitInputs input, std::size_t idx,
-                      GradientPair l_gpair, GradientPair r_gpair,
-                      SplitCandidate l_split, bst_feature_t fidx) const;
-  template <bool forward>
-  ScanElem Scan(const ScanElem& l, const ScanElem& r) const;
-  using Ty = std::tuple<ScanElem, ScanElem>;
-  Ty operator()(Ty const &l, Ty const &r) const;
+  template<bool forward>
+  ScanElem DoIt(ScanElem lhs, ScanElem rhs);
+  std::tuple<ScanElem, ScanElem>
+  operator() (std::tuple<ScanElem, ScanElem> lhs, std::tuple<ScanElem, ScanElem> rhs);
 };
 
 struct WriteScan {
-  using TupleT = typename DiscardIterator<std::tuple<ScanElem, ScanElem>>::OutputT;
-  EvaluateSplitInputs left;
-  EvaluateSplitInputs right;
-  std::span<ScanElem> out_scan;
-  std::size_t n_features;
+  EvaluateSplitInputs left, right;
+  SplitEvaluator evaluator;
+  std::span<ScanComputedElem> out_scan;
+  template <bool forward>
+  void DoIt(ScanElem e);
 
-  template<bool forward>
-  void DoIt(const ScanElem& candidate);
-  TupleT operator()(const TupleT& tu);
+  std::tuple<ScanElem, ScanElem>
+  operator() (std::tuple<ScanElem, ScanElem> e);
 };
 
-inline decltype(auto) EvaluateSplitsGetIterator(SplitEvaluator evaluator, EvaluateSplitInputs left,
-                                                EvaluateSplitInputs right) {
-  std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
-  auto for_counting = MakeForwardCountingIterator<uint64_t>(0ul);
-  auto rev_counting = MakeBackwardCountingIterator<uint64_t>(size - 1);
-  auto for_value_iter = MakeTransformIterator(for_counting,
-                                              ScanValueOp<true>{left, right, evaluator});
-  auto rev_value_iter = MakeTransformIterator(rev_counting,
-                                              ScanValueOp<false>{left, right, evaluator});
-
-  auto value_iter = MakeZipIterator(for_value_iter, rev_value_iter);
-  return value_iter;
-}
-
-std::vector<ScanElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
-                                                             EvaluateSplitInputs left,
-                                                             EvaluateSplitInputs right);
-
-void EvaluateSplits(std::span<SplitCandidate> out_splits,
-                    SplitEvaluator evaluator,
-                    EvaluateSplitInputs left,
-                    EvaluateSplitInputs right);
+std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
+                                                                     EvaluateSplitInputs left,
+                                                                     EvaluateSplitInputs right);
 
 #endif  // EVALUATOR_H_

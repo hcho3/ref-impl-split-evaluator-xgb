@@ -42,7 +42,7 @@ struct SimpleSplitCandidate {
   bool operator==(const SimpleSplitCandidate& rhs) const {
     return (fidx == rhs.fidx) && (fvalue == rhs.fvalue) && (loss_chg == rhs.loss_chg);
   }
-  friend auto operator<<(std::ostream& os, SimpleSplitCandidate const& m) -> std::ostream& {
+  friend std::ostream& operator<<(std::ostream& os, const SimpleSplitCandidate& m) {
     os << "(fidx: " << m.fidx << ", fvalue: " << m.fvalue << ", loss_chg: " << m.loss_chg << ")";
     return os;
   }

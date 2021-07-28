@@ -32,17 +32,32 @@ struct GradientPair {
     return {grad_ - rhs.grad_, hess_ - rhs.hess_};
   }
 
-  friend auto operator<<(std::ostream& os, GradientPair const& m) -> std::ostream& {
+  friend std::ostream& operator<<(std::ostream& os, const GradientPair& m) {
     os << "(grad_: " << m.grad_ << ", hess_: " << m.hess_ << ")";
     return os;
   }
 };
 
 struct GradStats {
-  double sum_grad{0};
-  double sum_hess{0};
+  double sum_grad;
+  double sum_hess;
 
+  GradStats() : sum_grad(0.0), sum_hess(0.0) {}
+  GradStats(double grad, double hess) : sum_grad(grad), sum_hess(hess) {}
   explicit GradStats(GradientPair pair) : sum_grad(pair.grad_), sum_hess(pair.hess_) {}
+
+  GradStats operator+(const GradStats& rhs) const {
+    return {sum_grad + rhs.sum_grad, sum_hess + rhs.sum_hess};
+  }
+
+  GradStats operator-(const GradStats& rhs) const {
+    return {sum_grad - rhs.sum_grad, sum_hess - rhs.sum_hess};
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const GradStats& m) {
+    os << "(sum_grad: " << m.sum_grad << ", sum_hess: " << m.sum_hess << ")";
+    return os;
+  }
 };
 
 enum class FeatureType : uint8_t {

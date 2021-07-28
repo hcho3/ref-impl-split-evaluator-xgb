@@ -1,310 +1,231 @@
-#include "param.h"
 #include "evaluator.h"
-#include "iterator.h"
 #include "helpers.h"
 #include "scan.h"
-#include "reduce.h"
-#include <span>
-#include <algorithm>
-#include <vector>
-#include <tuple>
-#include <iostream>
-#include <stdexcept>
-#include <cstddef>
-#include <cstdint>
-#include <cassert>
+#include <ostream>
+#include <string>
 
-template <bool forward>
-ScanElem
-ScanValueOp<forward>::operator() (std::size_t idx) {
-  ScanElem ret;
-  ret.idx = idx;
-  float fvalue;
-  std::size_t fidx;
-  bool is_cat;
-  float loss_chg;
-  GradientPair left_sum, right_sum;
-  bool is_segment_begin = false;
-  if (idx < left.gradient_histogram.size()) {
-    // left node
-    ret.grad = left.gradient_histogram[idx];
-    fvalue = left.feature_values[idx];
-    fidx = SegmentId(left.feature_segments, idx);
-    is_cat = IsCat(left.feature_types, fidx);
-    if ((forward && left.feature_segments[fidx] == idx) ||
-        (!forward && left.feature_segments[fidx + 1] - 1 == idx)) {
-      is_segment_begin = true;
-      if (forward) {
-        left_sum = ret.grad;
-        right_sum = left.parent_sum - ret.grad;
-      } else {
-        left_sum = left.parent_sum - ret.grad;
-        right_sum = ret.grad;
-      }
-      float parent_gain = evaluator.CalcGain(left.param, GradStats{left.parent_sum});
-      float gain = evaluator.CalcSplitGain(left.param, left.nidx, fidx,
-                                           GradStats{left_sum}, GradStats{right_sum});
-      loss_chg = gain - parent_gain;
-    }
-  } else {
-    // right node
-    idx -= left.gradient_histogram.size();
-    ret.grad = right.gradient_histogram[idx];
-    fvalue = right.feature_values[idx];
-    fidx = SegmentId(right.feature_segments, idx);
-    is_cat = IsCat(right.feature_types, fidx);
-    if ((forward && right.feature_segments[fidx] == idx) ||
-        (!forward && right.feature_segments[fidx + 1] - 1 == idx)) {
-      is_segment_begin = true;
-      if (forward) {
-        left_sum = ret.grad;
-        right_sum = right.parent_sum - ret.grad;
-      } else {
-        left_sum = right.parent_sum - ret.grad;
-        right_sum = ret.grad;
-      }
-      float parent_gain = evaluator.CalcGain(right.param, GradStats{right.parent_sum});
-      float gain = evaluator.CalcSplitGain(right.param, right.nidx, fidx,
-                                           GradStats{left_sum}, GradStats{right_sum});
-      loss_chg = gain - parent_gain;
-    }
-  }
-  if (!is_segment_begin) {
-    loss_chg = std::numeric_limits<float>::lowest();
-    left_sum = {0, 0};
-    right_sum = {0, 0};
-  }
-  ret.candidate = {loss_chg, (forward ? kRightDir : kLeftDir), static_cast<int>(fidx), fvalue,
-                   is_cat, left_sum, right_sum};
-  return ret;
-}
-
-template <bool forward, bool is_cat>
-SplitCandidate
-ScanOp::DoIt(EvaluateSplitInputs input, std::size_t idx, GradientPair l_gpair, GradientPair r_gpair,
-             SplitCandidate l_split, bst_feature_t fidx) const {
-  SplitCandidate best;
-  float gain = evaluator.CalcSplitGain(
-      input.param, input.nidx, fidx, GradStats{l_gpair}, GradStats{r_gpair});
-  best.Update(l_split, input.param);
-  float parent_gain = evaluator.CalcGain(input.param, GradStats{input.parent_sum});
-      // FIXME: get it out
-  float loss_chg = gain - parent_gain;
-  float fvalue = input.feature_values[idx];
-
-  if (forward) {
-    best.Update(loss_chg, kRightDir, fvalue, fidx, GradientPair{l_gpair},
-                GradientPair{r_gpair}, is_cat, input.param);
-  } else {
-    best.Update(loss_chg, kLeftDir, fvalue, fidx, GradientPair{r_gpair},
-                GradientPair{l_gpair}, is_cat, input.param);
-  }
-
-  return best;
-}
-
-template <bool forward>
-ScanElem
-ScanOp::Scan(const ScanElem& l, const ScanElem& r) const {
-  SplitCandidate l_split = l.candidate;
-
-  if (l.idx < left.gradient_histogram.size()) {
-    // Left node
-    auto r_idx = r.idx;
-
-    auto l_fidx = SegmentId(left.feature_segments, l.idx);
-    auto r_fidx = SegmentId(left.feature_segments, r.idx);
-    /* Segmented scan with 2 segments
-     * *****|******
-     * 0, 1 |  2, 3
-     *   /|_|_/| /|
-     * 0, 1 |  2, 5
-     * *****|******
-     */
-    if (l_fidx != r_fidx) {
-      // Segmented scan
-      return r;
-    }
-
-    assert(!left.feature_set.empty());
-    if ((left.feature_set.size() != left.feature_segments.size() - 1) &&
-        !std::binary_search(left.feature_set.begin(),
-                            left.feature_set.end(), l_fidx)) {
-      // column sampling
-      return {r_idx, r.grad, SplitCandidate{}};
-    }
-
-    if (IsCat(left.feature_types, l_fidx)) {
-      auto l_gpair = left.gradient_histogram[l.idx];
-      auto r_gpair = left.parent_sum - l_gpair;
-      auto best = DoIt<forward, true>(left, l.idx, l_gpair, r_gpair, l_split, l_fidx);
-      return {r_idx, r_gpair, best};
-    } else {
-      auto l_gpair = l.grad;
-      auto r_gpair = left.parent_sum - l_gpair;
-      SplitCandidate best = DoIt<forward, false>(left, l.idx, l_gpair, r_gpair, l_split, l_fidx);
-      return {r_idx, l_gpair + r.grad, best};
-    }
-  } else {
-    // Right node
-    assert(left.gradient_histogram.size() == right.gradient_histogram.size());
-    auto l_idx = l.idx - left.gradient_histogram.size();
-    auto r_idx = r.idx - left.gradient_histogram.size();
-
-    auto l_fidx = SegmentId(right.feature_segments, l_idx);
-    auto r_fidx = SegmentId(right.feature_segments, r_idx);
-    if (l_fidx != r_fidx) {
-      // Segmented scan
-      return {r.idx, r.grad, r.candidate};
-    }
-
-    assert(!right.feature_segments.empty());
-    if ((right.feature_set.size() != right.feature_segments.size()) &&
-        !std::binary_search(right.feature_set.begin(),
-                            right.feature_set.end(), l_fidx)) {
-      // column sampling
-      return {r_idx, r.grad, SplitCandidate{}};
-    }
-
-    if (IsCat(right.feature_types, l_fidx)) {
-      auto l_gpair = right.gradient_histogram[l_idx];
-      auto r_gpair = right.parent_sum - l_gpair;
-      auto best = DoIt<forward, true>(right, l_idx, l_gpair, r_gpair, l_split, l_fidx);
-      return {r_idx, r_gpair, best};
-    } else {
-      auto l_gpair = l.grad;
-      auto r_gpair = right.parent_sum - l_gpair;
-      auto best = DoIt<forward, false>(right, l_idx, l_gpair, r_gpair, l_split, l_fidx);
-      return {r_idx, l.grad + r.grad, best};
-    }
-  }
-}
-
-ScanOp::Ty
-ScanOp::operator() (ScanOp::Ty const &l, ScanOp::Ty const &r) const {
-  auto fw = Scan<true>(std::get<0>(l), std::get<0>(r));
-  auto bw = Scan<false>(std::get<1>(l), std::get<1>(r));
-  return std::make_tuple(fw, bw);
-}
-
-template <bool forward>
-void
-WriteScan::DoIt(const ScanElem& candidate) {
-  std::size_t offset = 0;
-  std::size_t beg_idx = 0;
-  std::size_t end_idx = 0;
-
-  auto fidx = candidate.candidate.findex;
-  auto idx = candidate.idx;
-
-  if (idx < left.gradient_histogram.size()) {
-    // left node
-    beg_idx = left.feature_segments[fidx];
-    auto f_size = left.feature_segments[fidx + 1] - beg_idx;
-    f_size = f_size == 0 ? 0 : f_size - 1;
-    end_idx = beg_idx + f_size;
-  } else {
-    // right node
-    beg_idx = right.feature_segments[fidx];
-    auto f_size = right.feature_segments[fidx + 1] - beg_idx;
-    f_size = f_size == 0 ? 0 : f_size - 1;
-    end_idx = beg_idx + f_size;
-    offset = n_features * 2;
-  }
-  if (forward) {
-    if (end_idx == idx) {
-      out_scan[offset + fidx] = candidate;
-    }
-  } else {
-    if (beg_idx == idx) {
-      out_scan[offset + n_features + fidx] = candidate;
-    }
-  }
-}
-
-WriteScan::TupleT
-WriteScan::operator()(const WriteScan::TupleT& tu) {
-  const ScanElem& fw = std::get<0>(tu);
-  const ScanElem& bw = std::get<1>(tu);
-  if (fw.candidate.findex != -1) {
-    DoIt<true>(fw);
-  }
-  if (bw.candidate.findex != -1) {
-    DoIt<false>(bw);
-  }
-  return {};  // discard
-}
-
-std::vector<ScanElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
-                                                             EvaluateSplitInputs left,
-                                                             EvaluateSplitInputs right) {
-  auto l_n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
-  auto r_n_features = right.feature_segments.empty() ? 0 : right.feature_segments.size() - 1;
-  auto n_features = l_n_features + r_n_features;
-  auto value_iter = EvaluateSplitsGetIterator(evaluator, left, right);
-  static_assert(std::is_same_v<
-      std::invoke_result_t<decltype(&decltype(value_iter)::Get), decltype(value_iter)>,
-      std::tuple<ScanElem, ScanElem>>);
-  std::vector<ScanElem> out_scan(n_features * 2);
-
-  auto out_it = MakeTransformOutputIterator(
-      DiscardIterator<std::tuple<ScanElem, ScanElem>>(),
-      WriteScan{left, right, ToSpan(out_scan), l_n_features});
-
-  std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
-  InclusiveScan(value_iter, out_it, ScanOp{left, right, evaluator}, size);
-  return out_scan;
-}
-
-void EvaluateSplits(std::span<SplitCandidate> out_splits,
-                    SplitEvaluator evaluator,
-                    EvaluateSplitInputs left,
-                    EvaluateSplitInputs right) {
+std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
+                                                                     EvaluateSplitInputs left,
+                                                                     EvaluateSplitInputs right) {
   auto l_n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
   auto r_n_features = right.feature_segments.empty() ? 0 : right.feature_segments.size() - 1;
   if (!(r_n_features == 0 || l_n_features == r_n_features)) {
     throw std::runtime_error("");
   }
 
-  auto out_scan = EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);
+  auto map_to_left_right = [&left](uint64_t idx) {
+    const auto left_hist_size = static_cast<uint64_t>(left.gradient_histogram.size());
+    if (idx < left_hist_size) {
+      // Left child node
+      return EvaluateSplitsHistEntry{ChildNodeIndicator::kLeftChild, idx};
+    } else {
+      // Right child node
+      return EvaluateSplitsHistEntry{ChildNodeIndicator::kRightChild, idx - left_hist_size};
+    }
+  };
 
-  auto reduce_key = MakeTransformIterator(
-      MakeForwardCountingIterator<bst_feature_t>(0),
-      [=] (bst_feature_t fidx) -> int {
-        if (fidx < l_n_features * 2) {
-          return 0;  // left node
-        } else {
-          return 1;  // right node
-        }
-      });
-  auto reduce_val = MakeTransformIterator(
-      MakeForwardCountingIterator<std::size_t>(0),
-       [out_scan](std::size_t idx) {
-        // No need to distinguish left and right node as we are just extracting values.
-        ScanElem candidate = out_scan[idx];
-        return candidate.candidate;
-      });
-  ReduceByKey(
-      reduce_key, out_scan.size(),
-      reduce_val, DiscardIterator<int>(), OutputIterator(out_splits.begin(), out_splits.end()),
-      [](int a, int b) { return (a == b); },
-      [=](SplitCandidate l, SplitCandidate r) {
-        l.Update(r, left.param);
-        return l;
-      });
+  std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
+  auto for_count_iter = MakeForwardCountingIterator<uint64_t>(0);
+  auto for_loc_iter = MakeTransformIterator(for_count_iter, map_to_left_right);
+  auto rev_count_iter = MakeBackwardCountingIterator<uint64_t>(static_cast<uint64_t>(size) - 1);
+  auto rev_loc_iter = MakeTransformIterator(rev_count_iter, map_to_left_right);
+  auto zip_loc_iter = MakeZipIterator(for_loc_iter, rev_loc_iter);
+
+  auto scan_input_iter = MakeTransformIterator(zip_loc_iter, ScanValueOp{left, right, evaluator});
+  std::vector<ScanComputedElem> out_scan(l_n_features * 2);
+  auto scan_out_iter = MakeTransformOutputIterator(
+      DiscardIterator<std::tuple<ScanElem, ScanElem>>(),
+      WriteScan{left, right, evaluator, ToSpan(out_scan)});
+  InclusiveScan(scan_input_iter, scan_out_iter, ScanOp{left, right, evaluator}, size);
+  return out_scan;
 }
 
-template struct ScanValueOp<true>;
-template struct ScanValueOp<false>;
-template SplitCandidate ScanOp::DoIt<true, true>(EvaluateSplitInputs, std::size_t, GradientPair,
-    GradientPair, SplitCandidate, bst_feature_t) const;
-template SplitCandidate ScanOp::DoIt<true, false>(EvaluateSplitInputs, std::size_t, GradientPair,
-    GradientPair, SplitCandidate, bst_feature_t) const;
-template SplitCandidate ScanOp::DoIt<false, true>(EvaluateSplitInputs, std::size_t, GradientPair,
-    GradientPair, SplitCandidate, bst_feature_t) const;
-template SplitCandidate ScanOp::DoIt<false, false>(EvaluateSplitInputs, std::size_t, GradientPair,
-    GradientPair, SplitCandidate, bst_feature_t) const;
-template ScanElem ScanOp::Scan<true>(const ScanElem&, const ScanElem&) const;
-template ScanElem ScanOp::Scan<false>(const ScanElem&, const ScanElem&) const;
-template void WriteScan::DoIt<true>(const ScanElem&);
-template void WriteScan::DoIt<false>(const ScanElem&);
+template <bool forward>
+ScanElem
+ScanValueOp::MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
+                                                  EvaluateSplitInputs split_input) {
+  ScanElem ret;
+  ret.valid_entry = true;
+  ret.indicator = entry.indicator;
+  ret.hist_idx = entry.hist_idx;
+  ret.gpair = split_input.gradient_histogram[entry.hist_idx];
+  ret.findex = static_cast<int32_t>(SegmentId(split_input.feature_segments, entry.hist_idx));
+  ret.fvalue = split_input.feature_values[entry.hist_idx];
+  ret.is_cat = IsCat(split_input.feature_types, ret.findex);
+  if ((forward && split_input.feature_segments[ret.findex] == entry.hist_idx) ||
+      (!forward && split_input.feature_segments[ret.findex + 1] - 1 == entry.hist_idx)) {
+    /**
+     * For the element at the beginning of each segment, compute gradient sums and loss_chg
+     * ahead of time. These will be later used by the inclusive scan operator.
+     **/
+    ret.computed = true;
+    if (forward) {
+      ret.computed_result.left_sum = GradStats{ret.gpair};
+      ret.computed_result.right_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
+    } else {
+      ret.computed_result.left_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
+      ret.computed_result.right_sum = GradStats{ret.gpair};
+    }
+    ret.computed_result.parent_sum = GradStats{split_input.parent_sum};
+    float parent_gain = evaluator.CalcGain(split_input.param, GradStats{split_input.parent_sum});
+    float gain = evaluator.CalcSplitGain(split_input.param, split_input.nidx, ret.findex,
+                                         ret.computed_result.left_sum,
+                                         ret.computed_result.right_sum);
+    ret.computed_result.best_loss_chg = gain - parent_gain;
+    ret.computed_result.best_findex = ret.findex;
+    ret.computed_result.best_fvalue = ret.fvalue;
+    ret.computed_result.best_direction =
+        (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir);
+  }
+
+  return ret;
+}
+
+std::tuple<ScanElem, ScanElem>
+ScanValueOp::operator() (
+    std::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup) {
+  auto [fw, bw] = entry_tup;
+  ScanElem ret_fw, ret_bw;
+  ret_fw = MapEvaluateSplitsHistEntryToScanElem<true>(
+      fw,
+      (fw.indicator == ChildNodeIndicator::kLeftChild ? this->left : this->right));
+  ret_bw = MapEvaluateSplitsHistEntryToScanElem<false>(
+      bw,
+      (bw.indicator == ChildNodeIndicator::kLeftChild ? this->left : this->right));
+  return std::make_tuple(ret_fw, ret_bw);
+}
+
+template <bool forward>
+ScanElem
+ScanOp::DoIt(ScanElem lhs, ScanElem rhs) {
+  ScanElem ret;
+  ret = rhs;
+  ret.computed_result = {};
+  ret.computed = true;
+  if (lhs.findex != rhs.findex || lhs.indicator != rhs.indicator) {
+    // Segmented Scan
+    return rhs;
+  }
+  if (((lhs.indicator == ChildNodeIndicator::kLeftChild) &&
+       (left.feature_set.size() != left.feature_segments.size()) &&
+       !std::binary_search(left.feature_set.begin(),
+                           left.feature_set.end(), lhs.findex)) ||
+      ((lhs.indicator == ChildNodeIndicator::kRightChild) &&
+       (right.feature_set.size() != right.feature_segments.size()) &&
+       !std::binary_search(right.feature_set.begin(),
+                           right.feature_set.end(), lhs.findex))) {
+    // Column sampling
+    // FIXME: Test with column sampling enabled
+    return rhs;
+  }
+
+  GradStats parent_sum = lhs.computed_result.parent_sum;
+  GradStats left_sum, right_sum;
+  if (forward) {
+    if (lhs.is_cat) {  // FIXME: Must test with categorical splits
+      left_sum = lhs.computed_result.parent_sum - GradStats{rhs.gpair};
+      right_sum = GradStats{rhs.gpair};
+    } else {
+      left_sum = lhs.computed_result.left_sum + GradStats{rhs.gpair};
+      right_sum = lhs.computed_result.parent_sum - left_sum;
+    }
+  } else {
+    if (lhs.is_cat) {  // FIXME: Must test with categorical splits
+      left_sum = lhs.computed_result.parent_sum - GradStats{rhs.gpair};
+      right_sum = GradStats{rhs.gpair};
+    } else {
+      right_sum = lhs.computed_result.right_sum + GradStats{rhs.gpair};
+      left_sum = lhs.computed_result.parent_sum - right_sum;
+    }
+  }
+  bst_node_t nidx = (lhs.indicator == ChildNodeIndicator::kLeftChild) ? left.nidx : right.nidx;
+  float gain = evaluator.CalcSplitGain(
+      left.param, nidx, lhs.findex, left_sum, right_sum);
+  float parent_gain = evaluator.CalcGain(left.param, parent_sum);
+  float loss_chg = gain - parent_gain;
+  if (loss_chg > lhs.computed_result.best_loss_chg) {
+    ret.computed_result.best_loss_chg = loss_chg;
+    ret.computed_result.best_findex = lhs.findex;
+    ret.computed_result.best_fvalue = lhs.fvalue;
+    ret.computed_result.best_direction =
+        (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir);
+    ret.computed_result.left_sum = left_sum;
+    ret.computed_result.right_sum = right_sum;
+    ret.computed_result.parent_sum = parent_sum;
+  } else {
+    ret.computed_result.best_loss_chg = lhs.computed_result.best_loss_chg;
+    ret.computed_result.best_findex = lhs.computed_result.best_findex;
+    ret.computed_result.best_fvalue = lhs.computed_result.best_fvalue;
+    ret.computed_result.best_direction = lhs.computed_result.best_direction;
+    ret.computed_result.left_sum = lhs.computed_result.left_sum;
+    ret.computed_result.right_sum = lhs.computed_result.right_sum;
+    ret.computed_result.parent_sum = lhs.computed_result.parent_sum;
+  }
+  return ret;
+}
+
+std::tuple<ScanElem, ScanElem>
+ScanOp::operator() (std::tuple<ScanElem, ScanElem> lhs, std::tuple<ScanElem, ScanElem> rhs) {
+  auto [lhs_fw, lhs_bw] = lhs;
+  auto [rhs_fw, rhs_bw] = rhs;
+  return std::make_tuple(DoIt<true>(lhs_fw, rhs_fw), DoIt<false>(lhs_bw, rhs_bw));
+};
+
+template <bool forward>
+void
+WriteScan::DoIt(ScanElem e) {
+  EvaluateSplitInputs& split_input =
+      (e.indicator == ChildNodeIndicator::kLeftChild) ? left : right;
+  std::size_t offset = 0;
+  std::size_t n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
+  if (e.indicator == ChildNodeIndicator::kRightChild) {
+    offset = n_features;
+  }
+  if ((!forward && split_input.feature_segments[e.findex] == e.hist_idx) ||
+      (forward && split_input.feature_segments[e.findex + 1] - 1 == e.hist_idx)) {
+    if (e.computed_result.best_loss_chg > out_scan[offset + e.findex].best_loss_chg) {
+      out_scan[offset + e.findex] = e.computed_result;
+    }
+  }
+}
+
+std::tuple<ScanElem, ScanElem>
+WriteScan::operator() (std::tuple<ScanElem, ScanElem> e) {
+  auto [fw, bw] = e;
+  DoIt<true>(fw);
+  DoIt<false>(bw);
+  return {};  // discard
+}
+
+std::ostream& operator<<(std::ostream& os, const EvaluateSplitsHistEntry& m) {
+  std::string indicator_str =
+      (m.indicator == ChildNodeIndicator::kLeftChild) ? "kLeftChild" : "kRightChild";
+  os << "(indicator: " << indicator_str << ", hist_idx: " << m.hist_idx << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const ScanComputedElem& m) {
+  std::string best_direction_str =
+      (m.best_direction == DefaultDirection::kLeftDir) ? "left" : "right";
+  os << "(left_sum: " << m.left_sum << ", right_sum: " << m.right_sum
+     << ", parent_sum: " << m.parent_sum << ", best_loss_chg: " << m.best_loss_chg
+     << ", best_findex: " << m.best_findex << ", best_fvalue: " << m.best_fvalue
+     << ", best_direction: " << best_direction_str << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const ScanElem& m) {
+  std::string indicator_str =
+      (m.indicator == ChildNodeIndicator::kLeftChild) ? "kLeftChild" : "kRightChild";
+  os << "(indicator: " << indicator_str << ", hist_idx: " << m.hist_idx
+     << ", findex: " << m.findex;
+  if (m.valid_entry) {
+    os << ", gpair: " << m.gpair << ", fvalue: " << m.fvalue
+       << ", is_cat: " << (m.is_cat ? "true" : "false");
+  }
+  if (m.computed) {
+    os << ", computed_result: " << m.computed_result;
+  }
+  os << ")";
+  return os;
+}
