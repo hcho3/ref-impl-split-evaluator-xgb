@@ -1,6 +1,7 @@
 #ifndef PARAM_H_
 #define PARAM_H_
 
+#include <ostream>
 #include <cstdint>
 
 struct TrainingParam {
@@ -29,6 +30,11 @@ struct GradientPair {
 
   GradientPair operator-(const GradientPair& rhs) const {
     return {grad_ - rhs.grad_, hess_ - rhs.hess_};
+  }
+
+  friend auto operator<<(std::ostream& os, GradientPair const& m) -> std::ostream& {
+    os << "(grad_: " << m.grad_ << ", hess_: " << m.hess_ << ")";
+    return os;
   }
 };
 
