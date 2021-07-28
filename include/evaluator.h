@@ -100,14 +100,12 @@ struct ScanComputedElem {
 };
 
 struct ScanElem {
-  bool valid_entry{true};  // FIXME: Delete -- only relevant for pretty-printing
   ChildNodeIndicator indicator{ChildNodeIndicator::kLeftChild};
   uint64_t hist_idx;
   GradientPair gpair{0.0, 0.0};
   int32_t findex{-1};
   float fvalue{std::numeric_limits<float>::quiet_NaN()};
   bool is_cat{false};
-  bool computed{false};  // FIXME: Delete -- only relevant for pretty-printing
   ScanComputedElem computed_result{};
 
   friend std::ostream& operator<<(std::ostream& os, const ScanElem& m);

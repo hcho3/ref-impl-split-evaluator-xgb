@@ -85,7 +85,6 @@ ScanElem
 ScanValueOp::MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
                                                   EvaluateSplitInputs split_input) {
   ScanElem ret;
-  ret.valid_entry = true;
   ret.indicator = entry.indicator;
   ret.hist_idx = entry.hist_idx;
   ret.gpair = split_input.gradient_histogram[entry.hist_idx];
@@ -98,7 +97,6 @@ ScanValueOp::MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
      * For the element at the beginning of each segment, compute gradient sums and loss_chg
      * ahead of time. These will be later used by the inclusive scan operator.
      **/
-    ret.computed = true;
     if (forward) {
       ret.computed_result.left_sum = GradStats{ret.gpair};
       ret.computed_result.right_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
@@ -141,7 +139,6 @@ ScanOp::DoIt(ScanElem lhs, ScanElem rhs) {
   ScanElem ret;
   ret = rhs;
   ret.computed_result = {};
-  ret.computed = true;
   if (lhs.findex != rhs.findex || lhs.indicator != rhs.indicator) {
     // Segmented Scan
     return rhs;
@@ -280,15 +277,9 @@ std::ostream& operator<<(std::ostream& os, const ScanElem& m) {
   std::string indicator_str =
       (m.indicator == ChildNodeIndicator::kLeftChild) ? "kLeftChild" : "kRightChild";
   os << "(indicator: " << indicator_str << ", hist_idx: " << m.hist_idx
-     << ", findex: " << m.findex;
-  if (m.valid_entry) {
-    os << ", gpair: " << m.gpair << ", fvalue: " << m.fvalue
-       << ", is_cat: " << (m.is_cat ? "true" : "false");
-  }
-  if (m.computed) {
-    os << ", computed_result: " << m.computed_result;
-  }
-  os << ")";
+     << ", findex: " << m.findex<< ", gpair: " << m.gpair << ", fvalue: " << m.fvalue
+     << ", is_cat: " << (m.is_cat ? "true" : "false")
+     << ", computed_result: " << m.computed_result << ")";
   return os;
 }
 
