@@ -24,6 +24,7 @@ target_sources(reference_split_evaluator
   test/test_main.cc
   test/test_evaluate_splits.cc
   test/test_iterator.cc
-  test/test_scan.cc)
+  test/test_scan.cc
+  test/test_reduce.cc)
 set_target_properties(reference_split_evaluator PROPERTIES CXX_STANDARD 20)
 target_compile_options(reference_split_evaluator PUBLIC -Wall -Wextra -pedantic)

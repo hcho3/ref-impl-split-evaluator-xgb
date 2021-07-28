@@ -32,6 +32,8 @@ void ReduceByKey(KeyIterator keys_first, std::size_t size, ValueIterator values_
       acc = current_value;
       last_reset_idx = i;
     }
+    keys_first.Next();
+    values_first.Next();
   }
   if (last_reset_idx != size) {
     keys_output.Set(prev_key);
