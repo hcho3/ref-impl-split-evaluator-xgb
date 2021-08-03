@@ -2,6 +2,7 @@
 #define EVALUATOR_H_
 
 #include "param.h"
+#include "helpers.h"
 #include <span>
 #include <limits>
 #include <vector>
@@ -10,16 +11,6 @@
 template <typename T>
 inline static T Sqr(T a) {
   return a * a;
-}
-
-template <typename IteratorT>
-inline std::size_t SegmentId(IteratorT first, IteratorT last, std::size_t idx) {
-  return std::upper_bound(first, last, idx) - 1 - first;
-}
-
-template <typename T>
-inline std::size_t SegmentId(std::span<T> segments_ptr, std::size_t idx) {
-  return SegmentId(segments_ptr.begin(), segments_ptr.end(), idx);
 }
 
 inline bool IsCat(std::span<FeatureType const> ft, bst_feature_t fidx) {
