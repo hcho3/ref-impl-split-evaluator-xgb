@@ -101,22 +101,26 @@ TEST(Iterator, Combination) {
   auto rev_zip_iter = thrust::make_zip_iterator(thrust::make_tuple(rev_counting, vec2.begin()));
   auto for_value_iter = thrust::make_transform_iterator(
       for_zip_iter,
-      [](thrust::tuple<int32_t, double> x) {
-        return thrust::make_tuple(thrust::get<0>(x) * 10, 50 - thrust::get<1>(x) * 30);
+      [](thrust::tuple<int32_t, double> e) {
+        return thrust::make_tuple(thrust::get<0>(e) * 10, 50 - thrust::get<1>(e) * 30);
       });
   auto rev_value_iter = thrust::make_transform_iterator(
       rev_zip_iter,
-      [](thrust::tuple<int32_t, double> x) {
-        return thrust::make_tuple(thrust::get<0>(x) * 10, 60 - thrust::get<1>(x) * 15);
+      [](thrust::tuple<int32_t, double> e) {
+        return thrust::make_tuple(thrust::get<0>(e) * 10, 60 - thrust::get<1>(e) * 15);
       });
   auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(for_value_iter, rev_value_iter));
   for (std::size_t i = 0; i < size; ++i) {
     const auto& x = thrust::get<0>(*zip_iter);
     const auto& y = thrust::get<1>(*zip_iter);
-    EXPECT_EQ(thrust::get<0>(x), static_cast<int32_t>(i) * 10);
-    EXPECT_FLOAT_EQ(thrust::get<1>(x), 50 - vec.at(i) * 30);
-    EXPECT_EQ(thrust::get<0>(y), (10 - static_cast<int32_t>(i)) * 10);
-    EXPECT_FLOAT_EQ(thrust::get<1>(y), 60 - vec2.at(i) * 15);
+    double x0 = thrust::get<0>(x);
+    double x1 = thrust::get<1>(x);
+    double y0 = thrust::get<0>(y);
+    double y1 = thrust::get<1>(y);
+    EXPECT_EQ(x0, static_cast<int32_t>(i) * 10);
+    EXPECT_FLOAT_EQ(x1, 50 - vec.at(i) * 30);
+    EXPECT_EQ(y0, (10 - static_cast<int32_t>(i)) * 10);
+    EXPECT_FLOAT_EQ(y1, 60 - vec2.at(i) * 15);
     ++zip_iter;
   }
 }
