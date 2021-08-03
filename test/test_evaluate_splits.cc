@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
-#include <tuple>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/tuple.h>
 #include <vector>
 #include <iostream>
 #include <cstdint>
@@ -25,7 +29,8 @@ struct EvaluateSplitsExample {
   TrainingParam param;
 };
 
-std::tuple<EvaluateSplitInputs, EvaluateSplitInputs> GetTreeStumpExample(EvaluateSplitsExample& data) {
+thrust::tuple<EvaluateSplitInputs, EvaluateSplitInputs>
+GetTreeStumpExample(EvaluateSplitsExample& data) {
   std::vector<bst_feature_t> feature_set{0, 1};
   std::vector<uint32_t> feature_segments{0, 2, 4};
   std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0};
@@ -64,7 +69,7 @@ std::tuple<EvaluateSplitInputs, EvaluateSplitInputs> GetTreeStumpExample(Evaluat
       ToSpan(data.feature_min_values),
       ToSpan(data.feature_histogram_right)};
 
-  return std::make_tuple(left, right);
+  return thrust::make_tuple(left, right);
 }
 
 }  // anonymous namespace
@@ -72,8 +77,8 @@ std::tuple<EvaluateSplitInputs, EvaluateSplitInputs> GetTreeStumpExample(Evaluat
 TEST(EvaluateSplits, ScanValueOp) {
   EvaluateSplitsExample example;
   auto split_inputs = GetTreeStumpExample(example);
-  EvaluateSplitInputs left = std::get<0>(split_inputs);
-  EvaluateSplitInputs right = std::get<1>(split_inputs);
+  EvaluateSplitInputs left = thrust::get<0>(split_inputs);
+  EvaluateSplitInputs right = thrust::get<1>(split_inputs);
 
   auto map_to_left_right = [&left](uint64_t idx) {
     const auto left_hist_size = static_cast<uint64_t>(left.gradient_histogram.size());
@@ -87,27 +92,32 @@ TEST(EvaluateSplits, ScanValueOp) {
   };
 
   std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
-  auto for_count_iter = MakeForwardCountingIterator<uint64_t>(0);
-  auto for_loc_iter = MakeTransformIterator(for_count_iter, map_to_left_right);
-  auto rev_count_iter = MakeBackwardCountingIterator<uint64_t>(static_cast<uint64_t>(size) - 1);
-  auto rev_loc_iter = MakeTransformIterator(rev_count_iter, map_to_left_right);
-  auto zip_loc_iter = MakeZipIterator(for_loc_iter, rev_loc_iter);
+  auto for_count_iter = thrust::make_counting_iterator<uint64_t>(0);
+  auto for_loc_iter = thrust::make_transform_iterator(for_count_iter, map_to_left_right);
+  auto rev_count_iter = thrust::make_reverse_iterator(
+      thrust::make_counting_iterator<uint64_t>(0) + static_cast<ptrdiff_t>(size));
+  auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
+  auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 
   SplitEvaluator evaluator;
-  auto scan_input_iter = MakeTransformIterator(zip_loc_iter, ScanValueOp{left, right, evaluator});
+  auto scan_input_iter = thrust::make_transform_iterator(
+      zip_loc_iter, ScanValueOp{left, right, evaluator});
   for (std::size_t i = 0; i < size; ++i) {
-    auto [fw, bw] = scan_input_iter.Get();
+    const auto& fw = thrust::get<0>(*scan_input_iter);
+    const auto& bw = thrust::get<1>(*scan_input_iter);
     if (g_verbose_flag) {
       std::cout << "forward: " << fw << std::endl << "backward: " << bw << std::endl;
     }
-    scan_input_iter.Next();
+    ++scan_input_iter;
   }
 }
 
 TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   SplitEvaluator evaluator;
   EvaluateSplitsExample example;
-  auto [left, right] = GetTreeStumpExample(example);
+  auto split_inputs = GetTreeStumpExample(example);
+  EvaluateSplitInputs left = thrust::get<0>(split_inputs);
+  EvaluateSplitInputs right = thrust::get<1>(split_inputs);
   std::vector<ScanComputedElem> out_scan =
       EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);
   if (g_verbose_flag) {
@@ -146,7 +156,9 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
 
 TEST(EvaluateSplits, E2ETreeStump) {
   EvaluateSplitsExample example;
-  auto [left, right] = GetTreeStumpExample(example);
+  auto split_inputs = GetTreeStumpExample(example);
+  EvaluateSplitInputs left = thrust::get<0>(split_inputs);
+  EvaluateSplitInputs right = thrust::get<1>(split_inputs);
   std::vector<SplitCandidate> out_splits(2);
   SplitEvaluator evaluator;
   EvaluateSplits(ToSpan(out_splits), evaluator, left, right);

@@ -2,6 +2,13 @@
 #include "helpers.h"
 #include "scan.h"
 #include "reduce.h"
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
+#include <thrust/iterator/transform_output_iterator.h>
+#include <thrust/tuple.h>
 #include <ostream>
 #include <string>
 
@@ -17,8 +24,8 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
 
   auto out_scan = EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);
 
-  auto reduce_key = MakeTransformIterator(
-      MakeForwardCountingIterator<bst_feature_t>(0),
+  auto reduce_key = thrust::make_transform_iterator(
+      thrust::make_counting_iterator<bst_feature_t>(0),
       [=] (bst_feature_t i) -> int {
         if (i < l_n_features) {
           return 0;  // left node
@@ -26,8 +33,8 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
           return 1;  // right node
         }
       });
-  auto reduce_val = MakeTransformIterator(
-      MakeForwardCountingIterator<std::size_t>(0),
+  auto reduce_val = thrust::make_transform_iterator(
+      thrust::make_counting_iterator<std::size_t>(0),
       [&out_scan, &left](std::size_t i) {
         ScanComputedElem c = out_scan.at(i);
         bool is_cat = IsCat(left.feature_types, c.best_findex);
@@ -35,8 +42,8 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
                               c.best_fvalue, is_cat, c.left_sum, c.right_sum};
       });
   ReduceByKey(
-      reduce_key, out_scan.size(), reduce_val, DiscardIterator<int>(),
-      OutputIterator(out_splits.begin(), out_splits.end()),
+      reduce_key, reduce_key + out_scan.size(), reduce_val,
+      thrust::make_discard_iterator(), out_splits.data(),
       [](int a, int b) { return (a == b); },
       [=](SplitCandidate l, SplitCandidate r) {
         l.Update(r, left.param);
@@ -65,16 +72,18 @@ std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvalua
   };
 
   std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
-  auto for_count_iter = MakeForwardCountingIterator<uint64_t>(0);
-  auto for_loc_iter = MakeTransformIterator(for_count_iter, map_to_left_right);
-  auto rev_count_iter = MakeBackwardCountingIterator<uint64_t>(static_cast<uint64_t>(size) - 1);
-  auto rev_loc_iter = MakeTransformIterator(rev_count_iter, map_to_left_right);
-  auto zip_loc_iter = MakeZipIterator(for_loc_iter, rev_loc_iter);
+  auto for_count_iter = thrust::make_counting_iterator<uint64_t>(0);
+  auto for_loc_iter = thrust::make_transform_iterator(for_count_iter, map_to_left_right);
+  auto rev_count_iter = thrust::make_reverse_iterator(
+      thrust::make_counting_iterator<uint64_t>(0) + static_cast<ptrdiff_t>(size));
+  auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
+  auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 
-  auto scan_input_iter = MakeTransformIterator(zip_loc_iter, ScanValueOp{left, right, evaluator});
+  auto scan_input_iter = thrust::make_transform_iterator(
+      zip_loc_iter, ScanValueOp{left, right, evaluator});
   std::vector<ScanComputedElem> out_scan(l_n_features * 2);
-  auto scan_out_iter = MakeTransformOutputIterator(
-      DiscardIterator<std::tuple<ScanElem, ScanElem>>(),
+  auto scan_out_iter = thrust::make_transform_output_iterator(
+      thrust::make_discard_iterator(),
       WriteScan{left, right, evaluator, ToSpan(out_scan)});
   InclusiveScan(scan_input_iter, scan_out_iter, ScanOp{left, right, evaluator}, size);
   return out_scan;
@@ -119,10 +128,11 @@ ScanValueOp::MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
   return ret;
 }
 
-std::tuple<ScanElem, ScanElem>
+thrust::tuple<ScanElem, ScanElem>
 ScanValueOp::operator() (
-    std::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup) {
-  auto [fw, bw] = entry_tup;
+    thrust::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup) {
+  const auto& fw = thrust::get<0>(entry_tup);
+  const auto& bw = thrust::get<1>(entry_tup);
   ScanElem ret_fw, ret_bw;
   ret_fw = MapEvaluateSplitsHistEntryToScanElem<true>(
       fw,
@@ -130,7 +140,7 @@ ScanValueOp::operator() (
   ret_bw = MapEvaluateSplitsHistEntryToScanElem<false>(
       bw,
       (bw.indicator == ChildNodeIndicator::kLeftChild ? this->left : this->right));
-  return std::make_tuple(ret_fw, ret_bw);
+  return thrust::make_tuple(ret_fw, ret_bw);
 }
 
 template <bool forward>
@@ -188,11 +198,13 @@ ScanOp::DoIt(ScanElem lhs, ScanElem rhs) {
   return ret;
 }
 
-std::tuple<ScanElem, ScanElem>
-ScanOp::operator() (std::tuple<ScanElem, ScanElem> lhs, std::tuple<ScanElem, ScanElem> rhs) {
-  auto [lhs_fw, lhs_bw] = lhs;
-  auto [rhs_fw, rhs_bw] = rhs;
-  return std::make_tuple(DoIt<true>(lhs_fw, rhs_fw), DoIt<false>(lhs_bw, rhs_bw));
+thrust::tuple<ScanElem, ScanElem>
+ScanOp::operator() (thrust::tuple<ScanElem, ScanElem> lhs, thrust::tuple<ScanElem, ScanElem> rhs) {
+  const auto& lhs_fw = thrust::get<0>(lhs);
+  const auto& lhs_bw = thrust::get<1>(lhs);
+  const auto& rhs_fw = thrust::get<0>(rhs);
+  const auto& rhs_bw = thrust::get<1>(rhs);
+  return thrust::make_tuple(DoIt<true>(lhs_fw, rhs_fw), DoIt<false>(lhs_bw, rhs_bw));
 };
 
 template <bool forward>
@@ -213,9 +225,10 @@ WriteScan::DoIt(ScanElem e) {
   }
 }
 
-std::tuple<ScanElem, ScanElem>
-WriteScan::operator() (std::tuple<ScanElem, ScanElem> e) {
-  auto [fw, bw] = e;
+thrust::tuple<ScanElem, ScanElem>
+WriteScan::operator() (thrust::tuple<ScanElem, ScanElem> e) {
+  const auto& fw = thrust::get<0>(e);
+  const auto& bw = thrust::get<1>(e);
   DoIt<true>(fw);
   DoIt<false>(bw);
   return {};  // discard

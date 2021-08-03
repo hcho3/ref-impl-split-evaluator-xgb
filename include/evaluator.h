@@ -1,11 +1,11 @@
 #ifndef EVALUATOR_H_
 #define EVALUATOR_H_
 
+#include "param.h"
 #include <span>
 #include <limits>
 #include <vector>
-#include "param.h"
-#include "iterator.h"
+#include <thrust/tuple.h>
 
 template <typename T>
 inline static T Sqr(T a) {
@@ -119,8 +119,8 @@ struct ScanValueOp {
   template <bool forward>
   ScanElem MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
                                                 EvaluateSplitInputs split_input);
-  std::tuple<ScanElem, ScanElem> operator()(
-      std::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup);
+  thrust::tuple<ScanElem, ScanElem> operator()(
+      thrust::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup);
 };
 
 struct ScanOp {
@@ -129,8 +129,8 @@ struct ScanOp {
 
   template<bool forward>
   ScanElem DoIt(ScanElem lhs, ScanElem rhs);
-  std::tuple<ScanElem, ScanElem>
-  operator() (std::tuple<ScanElem, ScanElem> lhs, std::tuple<ScanElem, ScanElem> rhs);
+  thrust::tuple<ScanElem, ScanElem>
+  operator() (thrust::tuple<ScanElem, ScanElem> lhs, thrust::tuple<ScanElem, ScanElem> rhs);
 };
 
 struct WriteScan {
@@ -140,8 +140,8 @@ struct WriteScan {
   template <bool forward>
   void DoIt(ScanElem e);
 
-  std::tuple<ScanElem, ScanElem>
-  operator() (std::tuple<ScanElem, ScanElem> e);
+  thrust::tuple<ScanElem, ScanElem>
+  operator() (thrust::tuple<ScanElem, ScanElem> e);
 };
 
 std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,

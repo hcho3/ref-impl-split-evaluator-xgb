@@ -1,19 +1,21 @@
+#include "scan.h"
 #include <gtest/gtest.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/tuple.h>
 #include <vector>
 #include <cstddef>
-#include "iterator.h"
-#include "scan.h"
 
 TEST(Scan, InclusiveScan) {
   {
     std::vector<int> vec{1, 0, 2, 2, 1, 3};
     std::vector<int> out(vec.size());
-    auto iter = InputIterator(vec.begin(), vec.end());
-    auto out_iter = OutputIterator(out.begin(), out.end());
     auto scan_op = [](int x, int y) {
       return x + y;
     };
-    InclusiveScan(iter, out_iter, scan_op, vec.size());
+    InclusiveScan(vec.begin(), out.begin(), scan_op, vec.size());
 
     std::vector<int> expected_out{1, 1, 3, 5, 6, 9};
     EXPECT_EQ(out, expected_out);
@@ -21,12 +23,10 @@ TEST(Scan, InclusiveScan) {
   {
     std::vector<int> vec{-5, 0, 2, -3, 2, 4, 0, -1, 2, 8};
     std::vector<int> out(vec.size());
-    auto iter = InputIterator(vec.begin(), vec.end());
-    auto out_iter = OutputIterator(out.begin(), out.end());
     auto scan_op = [](int x, int y) {
       return std::max(x, y);
     };
-    InclusiveScan(iter, out_iter, scan_op, vec.size());
+    InclusiveScan(vec.begin(), out.begin(), scan_op, vec.size());
 
     std::vector<int> expected_out{-5, 0, 2, 2, 2, 4, 4, 4, 4, 8};
     EXPECT_EQ(out, expected_out);
@@ -55,10 +55,9 @@ TEST(Scan, InclusiveScanWithTuples) {
     {0, 2.0f, 0.0}, {1, 11.0f, 4.0}, {0, 1.0f, 1.0}, {1, 12.0f, 2.0}, {1, 10.0f, 4.0}
   };
   std::vector<SimpleSplitCandidate> out(vec.size());
-  auto for_count_iter = MakeForwardCountingIterator(0);
-  auto for_iter = MakeTransformIterator(for_count_iter,
-                                        [&vec](std::size_t idx) { return vec.at(idx); });
-  auto out_iter = OutputIterator(out.begin(), out.end());
+  auto for_count_iter = thrust::make_counting_iterator<std::size_t>(0);
+  auto for_iter = thrust::make_transform_iterator(for_count_iter,
+                                                  [&vec](std::size_t idx) { return vec.at(idx); });
   auto scan_op = [](SimpleSplitCandidate x, SimpleSplitCandidate y) {
     if (x.loss_chg > y.loss_chg) {
       return x;
@@ -70,7 +69,7 @@ TEST(Scan, InclusiveScanWithTuples) {
     }
     return (x.fvalue < y.fvalue) ? x : y;
   };
-  InclusiveScan(for_iter, out_iter, scan_op, vec.size());
+  InclusiveScan(for_iter, out.begin(), scan_op, vec.size());
 
   std::vector<SimpleSplitCandidate> expected_out{
       {0, 2.0f, 0.0}, {1, 11.0f, 4.0}, {1, 11.0f, 4.0}, {1, 11.0f, 4.0}, {1, 10.0f, 4.0}
@@ -84,14 +83,14 @@ TEST(Scan, InclusiveScanWithTuplesForwardBackward) {
   std::vector<SimpleSplitCandidate> vec{
       {0, 2.0f, 0.0}, {1, 11.0f, 4.0}, {0, 1.0f, 1.0}, {1, 10.0f, 4.0}, {1, 12.0f, 2.0}
   };
-  std::vector<std::tuple<SimpleSplitCandidate, SimpleSplitCandidate>> out(vec.size());
-  auto for_count_iter = MakeForwardCountingIterator(0);
+  std::vector<thrust::tuple<SimpleSplitCandidate, SimpleSplitCandidate>> out(vec.size());
+  auto for_count_iter = thrust::make_counting_iterator<std::size_t>(0);
   auto access_fn = [&vec](std::size_t idx) { return vec.at(idx); };
-  auto for_iter = MakeTransformIterator(for_count_iter, access_fn);
-  auto rev_count_iter = MakeBackwardCountingIterator(vec.size() - 1);
-  auto rev_iter = MakeTransformIterator(rev_count_iter, access_fn);
-  auto zip_iter = MakeZipIterator(for_iter, rev_iter);
-  auto out_iter = OutputIterator(out.begin(), out.end());
+  auto for_iter = thrust::make_transform_iterator(for_count_iter, access_fn);
+  auto rev_count_iter = thrust::make_reverse_iterator(
+      thrust::make_counting_iterator(0) + static_cast<ptrdiff_t>(vec.size()));
+  auto rev_iter = thrust::make_transform_iterator(rev_count_iter, access_fn);
+  auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(for_iter, rev_iter));
   auto inner_scan_op = [](SimpleSplitCandidate x, SimpleSplitCandidate y) {
     if (x.loss_chg > y.loss_chg) {
       return x;
@@ -104,14 +103,14 @@ TEST(Scan, InclusiveScanWithTuplesForwardBackward) {
     return (x.fvalue < y.fvalue) ? x : y;
   };
   auto scan_op = [&inner_scan_op](
-      std::tuple<SimpleSplitCandidate, SimpleSplitCandidate> x,
-      std::tuple<SimpleSplitCandidate, SimpleSplitCandidate> y) {
-    return std::make_tuple(inner_scan_op(std::get<0>(x), std::get<0>(y)),
-                           inner_scan_op(std::get<1>(x), std::get<1>(y)));
+      thrust::tuple<SimpleSplitCandidate, SimpleSplitCandidate> x,
+      thrust::tuple<SimpleSplitCandidate, SimpleSplitCandidate> y) {
+    return thrust::make_tuple(inner_scan_op(thrust::get<0>(x), thrust::get<0>(y)),
+                              inner_scan_op(thrust::get<1>(x), thrust::get<1>(y)));
   };
-  InclusiveScan(zip_iter, out_iter, scan_op, vec.size());
+  InclusiveScan(zip_iter, out.begin(), scan_op, vec.size());
 
-  std::vector<std::tuple<SimpleSplitCandidate, SimpleSplitCandidate>> expected_out{
+  std::vector<thrust::tuple<SimpleSplitCandidate, SimpleSplitCandidate>> expected_out{
       {{0, 2.0f, 0.0}, {1, 12.0f, 2.0}},
       {{1, 11.0f, 4.0}, {1, 10.0f, 4.0}},
       {{1, 11.0f, 4.0}, {1, 10.0f, 4.0}},

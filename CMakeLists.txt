@@ -8,16 +8,22 @@ FetchContent_Declare(
     GIT_TAG        release-1.11.0
 )
 FetchContent_MakeAvailable(googletest)
+FetchContent_Declare(
+    thrust
+    GIT_REPOSITORY https://github.com/NVIDIA/thrust.git
+    GIT_TAG        1.13.0
+)
+FetchContent_MakeAvailable(thrust)
+thrust_create_target(Thrust HOST CPP DEVICE CPP)
 
 add_executable(reference_split_evaluator)
 target_include_directories(reference_split_evaluator PRIVATE include)
-target_link_libraries(reference_split_evaluator PRIVATE gtest)
+target_link_libraries(reference_split_evaluator PRIVATE gtest Thrust)
 target_sources(reference_split_evaluator
   PRIVATE
   src/evaluator.cc
   include/param.h
   include/evaluator.h
-  include/iterator.h
   include/scan.h
   include/reduce.h
   include/helpers.h

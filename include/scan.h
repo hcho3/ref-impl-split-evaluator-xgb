@@ -6,19 +6,18 @@
 
 template <typename InputIterT, typename OutputIterT, typename ScanOpT>
 void InclusiveScan(InputIterT in, OutputIterT out, ScanOpT ScanOp, std::size_t size) {
-  using ElemT = std::invoke_result_t<decltype(&InputIterT::Get), InputIterT>;
   if (size == 0) {
     return;
   }
-  ElemT acc = in.Get();
-  out.Set(acc);
-  in.Next();
-  out.Next();
+  auto acc = *in;
+  *out = acc;
+  ++in;
+  ++out;
   for (std::size_t i = 1; i < size; ++i) {
-    acc = ScanOp(acc, in.Get());
-    out.Set(acc);
-    in.Next();
-    out.Next();
+    acc = ScanOp(acc, *in);
+    *out = acc;
+    ++in;
+    ++out;
   }
 }
 
