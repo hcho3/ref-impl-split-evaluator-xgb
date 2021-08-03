@@ -4,7 +4,7 @@
 #include <cstddef>
 
 template <typename InputIterT, typename OutputIterT, typename ScanOpT>
-void InclusiveScan(InputIterT in, OutputIterT out, ScanOpT scan_op, std::size_t size) {
+inline void InclusiveScan(InputIterT in, OutputIterT out, ScanOpT scan_op, std::size_t size) {
   // Homebrew Scan implementation, since Thurst does not implement thrust::inclusive_scan
   // for host CPP target.
   if (size == 0) {

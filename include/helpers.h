@@ -8,7 +8,7 @@
 #include <span>
 
 template <typename VectorT, typename T = typename VectorT::value_type>
-std::span<T> ToSpan(VectorT& vec) {
+inline std::span<T> ToSpan(VectorT& vec) {
   return {std::begin(vec), std::end(vec)};
 }
 
