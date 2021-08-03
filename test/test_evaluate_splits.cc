@@ -11,7 +11,6 @@
 #include <cmath>
 #include "param.h"
 #include "evaluator.h"
-#include "scan.h"
 #include "helpers.h"
 
 extern bool g_verbose_flag;
