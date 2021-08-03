@@ -1,5 +1,5 @@
-#include "reduce.h"
 #include <gtest/gtest.h>
+#include <thrust/reduce.h>
 #include <vector>
 
 TEST(Reduce, ReduceByKey) {
@@ -9,8 +9,8 @@ TEST(Reduce, ReduceByKey) {
   std::vector<int> out_values(values.size());
   auto binary_pred = [](int x, int y) { return x == y; };
   auto binary_op = [](int x, int y) { return x + y; };
-  ReduceByKey(keys.begin(), keys.end(), values.begin(), out_keys.begin(), out_values.begin(),
-              binary_pred, binary_op);
+  thrust::reduce_by_key(keys.begin(), keys.end(), values.begin(), out_keys.begin(),
+                        out_values.begin(), binary_pred, binary_op);
 
   std::vector<int> expected_out_keys{1, 3, 2, 1};
   std::vector<int> expected_out_values{9, 21, 9, 3};

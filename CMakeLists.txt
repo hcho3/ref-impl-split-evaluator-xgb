@@ -25,7 +25,6 @@ target_sources(reference_split_evaluator
   include/param.h
   include/evaluator.h
   include/scan.h
-  include/reduce.h
   include/helpers.h
   test/test_main.cc
   test/test_evaluate_splits.cc

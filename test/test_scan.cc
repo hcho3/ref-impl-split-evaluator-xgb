@@ -88,7 +88,7 @@ TEST(Scan, InclusiveScanWithTuplesForwardBackward) {
   auto access_fn = [&vec](std::size_t idx) { return vec.at(idx); };
   auto for_iter = thrust::make_transform_iterator(for_count_iter, access_fn);
   auto rev_count_iter = thrust::make_reverse_iterator(
-      thrust::make_counting_iterator(0) + static_cast<ptrdiff_t>(vec.size()));
+      thrust::make_counting_iterator(0) + static_cast<std::ptrdiff_t>(vec.size()));
   auto rev_iter = thrust::make_transform_iterator(rev_count_iter, access_fn);
   auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(for_iter, rev_iter));
   auto inner_scan_op = [](SimpleSplitCandidate x, SimpleSplitCandidate y) {

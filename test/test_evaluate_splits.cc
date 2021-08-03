@@ -95,7 +95,7 @@ TEST(EvaluateSplits, ScanValueOp) {
   auto for_count_iter = thrust::make_counting_iterator<uint64_t>(0);
   auto for_loc_iter = thrust::make_transform_iterator(for_count_iter, map_to_left_right);
   auto rev_count_iter = thrust::make_reverse_iterator(
-      thrust::make_counting_iterator<uint64_t>(0) + static_cast<ptrdiff_t>(size));
+      thrust::make_counting_iterator<uint64_t>(0) + static_cast<std::ptrdiff_t>(size));
   auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
   auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 

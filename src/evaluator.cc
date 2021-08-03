@@ -1,7 +1,7 @@
 #include "evaluator.h"
 #include "helpers.h"
 #include "scan.h"
-#include "reduce.h"
+#include <thrust/reduce.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -9,6 +9,7 @@
 #include <thrust/iterator/reverse_iterator.h>
 #include <thrust/iterator/transform_output_iterator.h>
 #include <thrust/tuple.h>
+#include <cstddef>
 #include <ostream>
 #include <string>
 
@@ -41,8 +42,8 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
         return SplitCandidate{c.best_loss_chg, c.best_direction, c.best_findex,
                               c.best_fvalue, is_cat, c.left_sum, c.right_sum};
       });
-  ReduceByKey(
-      reduce_key, reduce_key + out_scan.size(), reduce_val,
+  thrust::reduce_by_key(
+      reduce_key, reduce_key + static_cast<std::ptrdiff_t>(out_scan.size()), reduce_val,
       thrust::make_discard_iterator(), out_splits.data(),
       [](int a, int b) { return (a == b); },
       [=](SplitCandidate l, SplitCandidate r) {
@@ -75,7 +76,7 @@ std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvalua
   auto for_count_iter = thrust::make_counting_iterator<uint64_t>(0);
   auto for_loc_iter = thrust::make_transform_iterator(for_count_iter, map_to_left_right);
   auto rev_count_iter = thrust::make_reverse_iterator(
-      thrust::make_counting_iterator<uint64_t>(0) + static_cast<ptrdiff_t>(size));
+      thrust::make_counting_iterator<uint64_t>(0) + static_cast<std::ptrdiff_t>(size));
   auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
   auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 
