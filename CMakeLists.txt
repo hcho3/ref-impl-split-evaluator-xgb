@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 project(reference_split_evaluator VERSION 0.0.1 LANGUAGES C CXX)
 
+option(USE_SANITIZER "Use sanitizer flags" OFF)
+SET(ENABLED_SANITIZERS "address" "leak" "undefined" CACHE STRING
+        "Semicolon separated list of sanitizer names. E.g 'address;leak'.")
+
+if(USE_SANITIZER)
+    include(cmake/Sanitizer.cmake)
+    enable_sanitizers("${ENABLED_SANITIZERS}")
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
     googletest
