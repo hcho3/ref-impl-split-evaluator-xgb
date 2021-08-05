@@ -111,8 +111,8 @@ TEST(Iterator, Combination) {
       });
   auto zip_iter = thrust::make_zip_iterator(thrust::make_tuple(for_value_iter, rev_value_iter));
   for (std::size_t i = 0; i < size; ++i) {
-    const auto& x = thrust::get<0>(*zip_iter);
-    const auto& y = thrust::get<1>(*zip_iter);
+    auto x = thrust::get<0>(*zip_iter);
+    auto y = thrust::get<1>(*zip_iter);
     double x0 = thrust::get<0>(x);
     double x1 = thrust::get<1>(x);
     double y0 = thrust::get<0>(y);

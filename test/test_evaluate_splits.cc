@@ -138,8 +138,8 @@ TEST(EvaluateSplits, ScanValueOp) {
   auto scan_input_iter = thrust::make_transform_iterator(
       zip_loc_iter, ScanValueOp{left, right, evaluator});
   for (std::size_t i = 0; i < size; ++i) {
-    const auto& fw = thrust::get<0>(*scan_input_iter);
-    const auto& bw = thrust::get<1>(*scan_input_iter);
+    auto fw = thrust::get<0>(*scan_input_iter);
+    auto bw = thrust::get<1>(*scan_input_iter);
     if (g_verbose_flag) {
       std::cout << "forward: " << fw << std::endl << "backward: " << bw << std::endl;
     }
@@ -221,6 +221,6 @@ TEST(EvaluateSplits, EvaluateSingleSplit) {
   TestEvaluateSingleSplit(false);
 }
 
-TEST(EvaluateSplits, EvaluateCategoricalSplit) {
+TEST(EvaluateSplits, EvaluateSingleCategoricalSplit) {
   TestEvaluateSingleSplit(true);
 }
