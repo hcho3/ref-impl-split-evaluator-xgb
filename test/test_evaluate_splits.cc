@@ -86,21 +86,32 @@ void TestEvaluateSingleSplit(bool is_categorical) {
 
   std::vector<FeatureType> feature_types(feature_set.size(),
                                          FeatureType::kCategorical);
-  EvaluateSplitInputs input{1,
-                            parent_sum,
-                            param,
-                            ToSpan(feature_set),
-                            (is_categorical ? ToSpan(feature_types) : std::span<FeatureType>{}),
-                            ToSpan(feature_segments),
-                            ToSpan(feature_values),
-                            ToSpan(feature_min_values),
-                            ToSpan(feature_histogram)};
+  EvaluateSplitInputs input{
+    1,
+    parent_sum,
+    param,
+    ToSpan(feature_set),
+    (is_categorical ? ToSpan(feature_types) : std::span<FeatureType>{}),
+    ToSpan(feature_segments),
+    ToSpan(feature_values),
+    ToSpan(feature_min_values),
+    ToSpan(feature_histogram)};
   SplitEvaluator evaluator;
   EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
 
+  if (g_verbose_flag) {
+    for (SplitCandidate e : out_splits) {
+      std::cout << e << std::endl;
+    }
+  }
+
   SplitCandidate result = out_splits[0];
   EXPECT_EQ(result.findex, 1);
-  EXPECT_EQ(result.fvalue, 11.0);
+  if (result.dir == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(result.fvalue, 11.0);
+  } else {
+    EXPECT_FLOAT_EQ(result.fvalue, 12.0);
+  }
   EXPECT_FLOAT_EQ(result.left_sum.sum_grad + result.right_sum.sum_grad,
                   parent_sum.grad_);
   EXPECT_FLOAT_EQ(result.left_sum.sum_hess + result.right_sum.sum_hess,
@@ -164,16 +175,28 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   // Left child
   EXPECT_FLOAT_EQ(out_scan[0].best_loss_chg, 1.0f);
   EXPECT_EQ(out_scan[0].best_findex, 0);
+  if (out_scan[0].best_direction == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(out_scan[0].best_fvalue, 1.0f);
+  } else {
+    EXPECT_FLOAT_EQ(out_scan[0].best_fvalue, 2.0f);
+  }
   EXPECT_FLOAT_EQ(out_scan[0].left_sum.sum_grad, -0.5);
   EXPECT_FLOAT_EQ(out_scan[0].left_sum.sum_hess, 0.5);
   EXPECT_FLOAT_EQ(out_scan[0].right_sum.sum_grad, 0.5);
   EXPECT_FLOAT_EQ(out_scan[0].right_sum.sum_hess, 0.5);
+
   EXPECT_FLOAT_EQ(out_scan[1].best_loss_chg, 4.0f);
   EXPECT_EQ(out_scan[1].best_findex, 1);
   EXPECT_FLOAT_EQ(out_scan[1].left_sum.sum_grad, -1.0);
   EXPECT_FLOAT_EQ(out_scan[1].left_sum.sum_hess, 0.5);
   EXPECT_FLOAT_EQ(out_scan[1].right_sum.sum_grad, 1.0);
   EXPECT_FLOAT_EQ(out_scan[1].right_sum.sum_hess, 0.5);
+  if (out_scan[1].best_direction == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(out_scan[1].best_fvalue, 11.0f);
+  } else {
+    EXPECT_FLOAT_EQ(out_scan[1].best_fvalue, 12.0f);
+  }
+
   // Right child
   EXPECT_FLOAT_EQ(out_scan[2].best_loss_chg, 4.0f);
   EXPECT_EQ(out_scan[2].best_findex, 0);
@@ -181,12 +204,23 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   EXPECT_FLOAT_EQ(out_scan[2].left_sum.sum_hess, 0.5);
   EXPECT_FLOAT_EQ(out_scan[2].right_sum.sum_grad, 1.0);
   EXPECT_FLOAT_EQ(out_scan[2].right_sum.sum_hess, 0.5);
+  if (out_scan[2].best_direction == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(out_scan[2].best_fvalue, 1.0f);
+  } else {
+    EXPECT_FLOAT_EQ(out_scan[2].best_fvalue, 2.0f);
+  }
+
   EXPECT_FLOAT_EQ(out_scan[3].best_loss_chg, 1.0f);
   EXPECT_EQ(out_scan[3].best_findex, 1);
   EXPECT_FLOAT_EQ(out_scan[3].left_sum.sum_grad, -0.5);
   EXPECT_FLOAT_EQ(out_scan[3].left_sum.sum_hess, 0.5);
   EXPECT_FLOAT_EQ(out_scan[3].right_sum.sum_grad, 0.5);
   EXPECT_FLOAT_EQ(out_scan[3].right_sum.sum_hess, 0.5);
+  if (out_scan[3].best_direction == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(out_scan[3].best_fvalue, 11.0f);
+  } else {
+    EXPECT_FLOAT_EQ(out_scan[3].best_fvalue, 12.0f);
+  }
 }
 
 TEST(EvaluateSplits, E2ETreeStump) {
@@ -206,15 +240,21 @@ TEST(EvaluateSplits, E2ETreeStump) {
 
   SplitCandidate result_left = out_splits[0];
   EXPECT_EQ(result_left.findex, 1);
-  EXPECT_EQ(result_left.fvalue, 11.0f);
-  EXPECT_EQ(result_left.dir, DefaultDirection::kRightDir);
   EXPECT_FLOAT_EQ(result_left.loss_chg, 4.0f);
+  if (result_left.dir == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(result_left.fvalue, 11.0f);
+  } else {
+    EXPECT_FLOAT_EQ(result_left.fvalue, 12.0f);
+  }
 
   SplitCandidate result_right = out_splits[1];
   EXPECT_EQ(result_right.findex, 0);
-  EXPECT_EQ(result_right.fvalue, 2.0f);
-  EXPECT_EQ(result_right.dir, DefaultDirection::kLeftDir);
   EXPECT_FLOAT_EQ(result_right.loss_chg, 4.0f);
+  if (result_right.dir == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(result_right.fvalue, 1.0f);
+  } else {
+    EXPECT_FLOAT_EQ(result_right.fvalue, 2.0f);
+  }
 }
 
 TEST(EvaluateSplits, EvaluateSingleSplit) {
