@@ -20,7 +20,7 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
   auto l_n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
   auto r_n_features = right.feature_segments.empty() ? 0 : right.feature_segments.size() - 1;
   if (!(r_n_features == 0 || l_n_features == r_n_features)) {
-    throw std::runtime_error("");
+    throw std::runtime_error("Invariant violated");
   }
 
   auto out_scan = EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);
@@ -52,13 +52,19 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
       });
 }
 
+void EvaluateSingleSplit(std::span<SplitCandidate> out_split,
+                         SplitEvaluator evaluator,
+                         EvaluateSplitInputs input) {
+  EvaluateSplits(out_split, evaluator, input, {});
+}
+
 std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
                                                                      EvaluateSplitInputs left,
                                                                      EvaluateSplitInputs right) {
   auto l_n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
   auto r_n_features = right.feature_segments.empty() ? 0 : right.feature_segments.size() - 1;
   if (!(r_n_features == 0 || l_n_features == r_n_features)) {
-    throw std::runtime_error("");
+    throw std::runtime_error("Invariant violated");
   }
 
   auto map_to_left_right = [&left](uint64_t idx) {
@@ -82,7 +88,7 @@ std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvalua
 
   auto scan_input_iter = thrust::make_transform_iterator(
       zip_loc_iter, ScanValueOp{left, right, evaluator});
-  std::vector<ScanComputedElem> out_scan(l_n_features * 2);
+  std::vector<ScanComputedElem> out_scan(l_n_features + r_n_features);
   auto scan_out_iter = thrust::make_transform_output_iterator(
       thrust::make_discard_iterator(),
       WriteScan{left, right, evaluator, ToSpan(out_scan)});

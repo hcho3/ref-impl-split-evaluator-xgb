@@ -71,6 +71,42 @@ GetTreeStumpExample(EvaluateSplitsExample& data) {
   return thrust::make_tuple(left, right);
 }
 
+void TestEvaluateSingleSplit(bool is_categorical) {
+  std::vector<SplitCandidate> out_splits(1);
+  GradientPair parent_sum{0.0, 1.0};
+  TrainingParam param{0.0f};
+
+  std::vector<bst_feature_t> feature_set{0, 1};
+  std::vector<uint32_t> feature_segments{0, 2, 4};
+  std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0};
+  std::vector<float> feature_min_values{0.0, 0.0};
+  // Setup gradients so that second feature gets higher gain
+  std::vector<GradientPair> feature_histogram{
+    {-0.5, 0.5}, {0.5, 0.5}, {-1.0, 0.5}, {1.0, 0.5}};
+
+  std::vector<FeatureType> feature_types(feature_set.size(),
+                                         FeatureType::kCategorical);
+  EvaluateSplitInputs input{1,
+                            parent_sum,
+                            param,
+                            ToSpan(feature_set),
+                            (is_categorical ? ToSpan(feature_types) : std::span<FeatureType>{}),
+                            ToSpan(feature_segments),
+                            ToSpan(feature_values),
+                            ToSpan(feature_min_values),
+                            ToSpan(feature_histogram)};
+  SplitEvaluator evaluator;
+  EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
+
+  SplitCandidate result = out_splits[0];
+  EXPECT_EQ(result.findex, 1);
+  EXPECT_EQ(result.fvalue, 11.0);
+  EXPECT_FLOAT_EQ(result.left_sum.sum_grad + result.right_sum.sum_grad,
+                  parent_sum.grad_);
+  EXPECT_FLOAT_EQ(result.left_sum.sum_hess + result.right_sum.sum_hess,
+                  parent_sum.hess_);
+}
+
 }  // anonymous namespace
 
 TEST(EvaluateSplits, ScanValueOp) {
@@ -179,4 +215,12 @@ TEST(EvaluateSplits, E2ETreeStump) {
   EXPECT_EQ(result_right.fvalue, 2.0f);
   EXPECT_EQ(result_right.dir, DefaultDirection::kLeftDir);
   EXPECT_FLOAT_EQ(result_right.loss_chg, 4.0f);
+}
+
+TEST(EvaluateSplits, EvaluateSingleSplit) {
+  TestEvaluateSingleSplit(false);
+}
+
+TEST(EvaluateSplits, EvaluateCategoricalSplit) {
+  TestEvaluateSingleSplit(true);
 }

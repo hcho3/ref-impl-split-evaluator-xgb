@@ -143,4 +143,8 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
                     EvaluateSplitInputs left,
                     EvaluateSplitInputs right);
 
+void EvaluateSingleSplit(std::span<SplitCandidate> out_split,
+                         SplitEvaluator evaluator,
+                         EvaluateSplitInputs input);
+
 #endif  // EVALUATOR_H_
