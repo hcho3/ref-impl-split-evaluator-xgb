@@ -113,12 +113,17 @@ ScanValueOp::MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
      * For the element at the beginning of each segment, compute gradient sums and loss_chg
      * ahead of time. These will be later used by the inclusive scan operator.
      **/
-    if (forward) {
-      ret.computed_result.left_sum = GradStats{ret.gpair};
-      ret.computed_result.right_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
-    } else {
+    if (ret.is_cat) {
       ret.computed_result.left_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
       ret.computed_result.right_sum = GradStats{ret.gpair};
+    } else {
+      if (forward) {
+        ret.computed_result.left_sum = GradStats{ret.gpair};
+        ret.computed_result.right_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
+      } else {
+        ret.computed_result.left_sum = GradStats{split_input.parent_sum} - GradStats{ret.gpair};
+        ret.computed_result.right_sum = GradStats{ret.gpair};
+      }
     }
     ret.computed_result.parent_sum = GradStats{split_input.parent_sum};
     float parent_gain = evaluator.CalcGain(split_input.param, GradStats{split_input.parent_sum});
