@@ -349,3 +349,66 @@ TEST(EvaluateSplits, EvaluateSingleSplitEmpty) {
   EXPECT_EQ(result.findex, -1);
   EXPECT_LT(result.loss_chg, 0.0f);
 }
+
+// Feature 0 produces the best split, but the algorithm must account for feature sampling
+TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
+  std::vector<SplitCandidate> out_splits(2);
+  GradientPair parent_sum{0.0, 1.0};
+  TrainingParam param{0.0f};
+
+  std::vector<bst_feature_t> feature_set_left{2};
+  std::vector<bst_feature_t> feature_set_right{1};
+  std::vector<uint32_t> feature_segments{0, 2, 4, 6};
+  std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0, 100.0, 200.0};
+  std::vector<float> feature_min_values{0.0, 10.0, 98.0};
+  std::vector<GradientPair> feature_histogram{
+    {-10.0, 0.5}, {10.0, 0.5}, {-0.5, 0.5}, {0.5, 0.5}, {-1.0, 0.5}, {1.0, 0.5}
+  };
+  EvaluateSplitInputs left{
+    1,
+    parent_sum,
+    param,
+    ToSpan(feature_set_left),
+    {},
+    ToSpan(feature_segments),
+    ToSpan(feature_values),
+    ToSpan(feature_min_values),
+    ToSpan(feature_histogram)};
+  EvaluateSplitInputs right{
+    2,
+    parent_sum,
+    param,
+    ToSpan(feature_set_right),
+    {},
+    ToSpan(feature_segments),
+    ToSpan(feature_values),
+    ToSpan(feature_min_values),
+    ToSpan(feature_histogram)};
+
+  SplitEvaluator evaluator;
+  EvaluateSplits(ToSpan(out_splits), evaluator, left, right);
+
+  EXPECT_EQ(out_splits[0].findex, 2);
+  if (out_splits[0].dir == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(out_splits[0].fvalue, 100.0f);
+  } else {
+    EXPECT_FLOAT_EQ(out_splits[0].fvalue, 200.0f);
+  }
+  EXPECT_FLOAT_EQ(out_splits[0].loss_chg, 4.0f);
+  EXPECT_FLOAT_EQ(out_splits[0].left_sum.sum_grad, -1.0);
+  EXPECT_FLOAT_EQ(out_splits[0].left_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_splits[0].right_sum.sum_grad, 1.0);
+  EXPECT_FLOAT_EQ(out_splits[0].right_sum.sum_hess, 0.5);
+
+  EXPECT_EQ(out_splits[1].findex, 1);
+  if (out_splits[1].dir == DefaultDirection::kRightDir) {
+    EXPECT_FLOAT_EQ(out_splits[1].fvalue, 11.0f);
+  } else {
+    EXPECT_FLOAT_EQ(out_splits[1].fvalue, 12.0f);
+  }
+  EXPECT_FLOAT_EQ(out_splits[1].loss_chg, 1.0f);
+  EXPECT_FLOAT_EQ(out_splits[1].left_sum.sum_grad, -0.5);
+  EXPECT_FLOAT_EQ(out_splits[1].left_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_splits[1].right_sum.sum_grad, 0.5);
+  EXPECT_FLOAT_EQ(out_splits[1].right_sum.sum_hess, 0.5);
+}

@@ -181,13 +181,12 @@ ScanOp::DoIt(ScanElem lhs, ScanElem rhs) {
        !std::binary_search(right.feature_set.begin(),
                            right.feature_set.end(), lhs.findex))) {
     // Column sampling
-    // FIXME: Test with column sampling enabled
     return rhs;
   }
 
   GradStats parent_sum = lhs.computed_result.parent_sum;
   GradStats left_sum, right_sum;
-  if (lhs.is_cat) {  // FIXME: Must test with categorical splits
+  if (lhs.is_cat) {
     left_sum = lhs.computed_result.parent_sum - GradStats{rhs.gpair};
     right_sum = GradStats{rhs.gpair};
   } else {
