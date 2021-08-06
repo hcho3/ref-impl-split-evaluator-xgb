@@ -118,6 +118,51 @@ void TestEvaluateSingleSplit(bool is_categorical) {
                   parent_sum.hess_);
 }
 
+void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
+  std::vector<SplitCandidate> out_splits(1);
+  GradientPair parent_sum{1.0, 1.5};
+  TrainingParam param;
+
+  std::vector<bst_feature_t> feature_set{0};
+  std::vector<uint32_t> feature_segments{0, 2};
+  std::vector<float> feature_values{1.0, 2.0};
+  std::vector<float> feature_min_values{0.0};
+  std::vector<GradientPair> feature_histogram{{-0.5, 0.5}, {0.5, 0.5}};
+  // The sum of gradient for the data points that lack a value for Feature 0 is (1.0, 0.5)
+
+  std::vector<FeatureType> feature_types(feature_set.size(),
+                                         FeatureType::kCategorical);
+  EvaluateSplitInputs input{
+    1,
+    parent_sum,
+    param,
+    ToSpan(feature_set),
+    (is_categorical ? ToSpan(feature_types) : std::span<FeatureType>{}),
+    ToSpan(feature_segments),
+    ToSpan(feature_values),
+    ToSpan(feature_min_values),
+    ToSpan(feature_histogram)};
+
+  SplitEvaluator evaluator;
+  EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
+
+  if (g_verbose_flag) {
+    for (SplitCandidate e : out_splits) {
+      std::cout << e << std::endl;
+    }
+  }
+
+  SplitCandidate result = out_splits[0];
+  EXPECT_EQ(result.findex, 0);
+  EXPECT_FLOAT_EQ(result.fvalue, 1.0);
+  EXPECT_EQ(result.dir, DefaultDirection::kRightDir);
+  EXPECT_FLOAT_EQ(result.left_sum.sum_grad, -0.5);
+  EXPECT_FLOAT_EQ(result.left_sum.sum_hess, 0.5);
+  EXPECT_EQ(result.right_sum.sum_grad, 1.5);
+  EXPECT_EQ(result.right_sum.sum_hess, 1.0);
+  EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.grad_) / parent_sum.hess_);
+}
+
 }  // anonymous namespace
 
 TEST(EvaluateSplits, ScanValueOp) {
@@ -263,4 +308,12 @@ TEST(EvaluateSplits, EvaluateSingleSplit) {
 
 TEST(EvaluateSplits, EvaluateSingleCategoricalSplit) {
   TestEvaluateSingleSplit(true);
+}
+
+TEST(EvaluateSplits, EvaluateSingleSplitWithMissing) {
+  TestEvaluateSingleSplitWithMissing(false);
+}
+
+TEST(EvaluateSplits, EvaluateSingleCategoricalSplitWithMissing) {
+  TestEvaluateSingleSplitWithMissing(true);
 }
