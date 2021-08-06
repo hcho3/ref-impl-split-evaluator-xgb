@@ -10,6 +10,7 @@
 #include <thrust/iterator/transform_output_iterator.h>
 #include <thrust/tuple.h>
 #include <cstddef>
+#include <algorithm>
 #include <ostream>
 #include <string>
 
@@ -21,6 +22,12 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
   auto r_n_features = right.feature_segments.empty() ? 0 : right.feature_segments.size() - 1;
   if (!(r_n_features == 0 || l_n_features == r_n_features)) {
     throw std::runtime_error("Invariant violated");
+  }
+
+  // Handle empty (trivial) input
+  if (l_n_features == 0 && r_n_features == 0) {
+    std::fill(out_splits.begin(), out_splits.end(), SplitCandidate{});
+    return;
   }
 
   auto out_scan = EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);

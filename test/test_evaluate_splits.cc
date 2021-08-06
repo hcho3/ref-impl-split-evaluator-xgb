@@ -333,3 +333,19 @@ TEST(EvaluateSplits, EvaluateSingleSplitWithMissing) {
 TEST(EvaluateSplits, EvaluateSingleCategoricalSplitWithMissing) {
   TestEvaluateSingleSplitWithMissing(true);
 }
+
+TEST(EvaluateSplits, EvaluateSingleSplitEmpty) {
+  SplitCandidate nonzeroed;
+  nonzeroed.findex = 1;
+  nonzeroed.loss_chg = 1.0;
+
+  std::vector<SplitCandidate> out_split(1);
+  out_split[0] = nonzeroed;
+
+  SplitEvaluator evaluator;
+  EvaluateSingleSplit(ToSpan(out_split), evaluator, EvaluateSplitInputs{});
+
+  SplitCandidate result = out_split[0];
+  EXPECT_EQ(result.findex, -1);
+  EXPECT_LT(result.loss_chg, 0.0f);
+}
