@@ -154,13 +154,29 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
 
   SplitCandidate result = out_splits[0];
   EXPECT_EQ(result.findex, 0);
-  EXPECT_FLOAT_EQ(result.fvalue, 1.0);
-  EXPECT_EQ(result.dir, DefaultDirection::kRightDir);
-  EXPECT_FLOAT_EQ(result.left_sum.sum_grad, -0.5);
-  EXPECT_FLOAT_EQ(result.left_sum.sum_hess, 0.5);
-  EXPECT_EQ(result.right_sum.sum_grad, 1.5);
-  EXPECT_EQ(result.right_sum.sum_hess, 1.0);
-  EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.grad_) / parent_sum.hess_);
+  if (is_categorical) {
+    // If the feature is categorical, forward and backward passes yield identical split candidate.
+    // So result.dir can be kRightDir or kLeftDir.
+    EXPECT_FLOAT_EQ(result.fvalue, 1.0);
+    // (One-hot) categorical splits specify a single matching category. The data points whose
+    // feature values match this single category are associated with the **right** child node;
+    // all the other data points are associated with the left child node.
+    // Thus, the right_sum variable is set to the gradient sum of all data points whose feature
+    // value is identical to the matching category.
+    EXPECT_FLOAT_EQ(result.left_sum.sum_grad, 1.5);
+    EXPECT_FLOAT_EQ(result.left_sum.sum_hess, 1.0);
+    EXPECT_EQ(result.right_sum.sum_grad, -0.5);
+    EXPECT_EQ(result.right_sum.sum_hess, 0.5);
+    EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.grad_) / parent_sum.hess_);
+  } else {
+    EXPECT_FLOAT_EQ(result.fvalue, 1.0);
+    EXPECT_EQ(result.dir, DefaultDirection::kRightDir);
+    EXPECT_FLOAT_EQ(result.left_sum.sum_grad, -0.5);
+    EXPECT_FLOAT_EQ(result.left_sum.sum_hess, 0.5);
+    EXPECT_EQ(result.right_sum.sum_grad, 1.5);
+    EXPECT_EQ(result.right_sum.sum_hess, 1.0);
+    EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.grad_) / parent_sum.hess_);
+  }
 }
 
 }  // anonymous namespace
