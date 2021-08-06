@@ -175,18 +175,13 @@ ScanOp::DoIt(ScanElem lhs, ScanElem rhs) {
 
   GradStats parent_sum = lhs.computed_result.parent_sum;
   GradStats left_sum, right_sum;
-  if (forward) {
-    if (lhs.is_cat) {  // FIXME: Must test with categorical splits
-      left_sum = lhs.computed_result.parent_sum - GradStats{rhs.gpair};
-      right_sum = GradStats{rhs.gpair};
-    } else {
+  if (lhs.is_cat) {  // FIXME: Must test with categorical splits
+    left_sum = lhs.computed_result.parent_sum - GradStats{rhs.gpair};
+    right_sum = GradStats{rhs.gpair};
+  } else {
+    if (forward) {
       left_sum = lhs.computed_result.left_sum + GradStats{rhs.gpair};
       right_sum = lhs.computed_result.parent_sum - left_sum;
-    }
-  } else {
-    if (lhs.is_cat) {  // FIXME: Must test with categorical splits
-      left_sum = lhs.computed_result.parent_sum - GradStats{rhs.gpair};
-      right_sum = GradStats{rhs.gpair};
     } else {
       right_sum = lhs.computed_result.right_sum + GradStats{rhs.gpair};
       left_sum = lhs.computed_result.parent_sum - right_sum;
