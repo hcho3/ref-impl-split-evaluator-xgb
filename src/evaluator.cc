@@ -44,11 +44,10 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
       });
   auto reduce_val = thrust::make_transform_iterator(
       thrust::make_counting_iterator<std::size_t>(0),
-      [&out_scan, &left](std::size_t i) {
+      [&out_scan](std::size_t i) {
         ScanComputedElem<GradientSumT> c = out_scan.at(i);
-        bool is_cat = IsCat(left.feature_types, c.best_findex);
         return SplitCandidate{c.best_loss_chg, c.best_direction, c.best_findex,
-                              c.best_fvalue, is_cat, c.left_sum, c.right_sum};
+                              c.best_fvalue, c.is_cat, c.left_sum, c.right_sum};
       });
   thrust::reduce_by_key(
       reduce_key, reduce_key + static_cast<std::ptrdiff_t>(out_scan.size()), reduce_val,
@@ -213,7 +212,7 @@ ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rh
   float loss_chg = gain - parent_gain;
   ret.computed_result = lhs.computed_result;
   ret.computed_result.Update(left_sum, right_sum, parent_sum,
-                             loss_chg, lhs.findex, lhs.fvalue,
+                             loss_chg, lhs.findex, lhs.is_cat, lhs.fvalue,
                              (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir),
                              left.param);
   return ret;
@@ -269,6 +268,7 @@ ScanComputedElem<GradientSumT>::Update(
     GradientSumT parent_sum_in,
     float loss_chg_in,
     int32_t findex_in,
+    bool is_cat_in,
     float fvalue_in,
     DefaultDirection dir_in,
     const TrainingParam& param) {
@@ -277,6 +277,7 @@ ScanComputedElem<GradientSumT>::Update(
       right_sum_in.sum_hess >= param.min_child_weight) {
     best_loss_chg = loss_chg_in;
     best_findex = findex_in;
+    is_cat = is_cat_in;
     best_fvalue = fvalue_in;
     best_direction = dir_in;
     left_sum = left_sum_in;

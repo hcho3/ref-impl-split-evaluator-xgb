@@ -79,6 +79,7 @@ struct ScanComputedElem {
   GradientSumT parent_sum{0.0, 0.0};
   float best_loss_chg{std::numeric_limits<float>::lowest()};
   int32_t best_findex{-1};
+  bool is_cat{false};
   float best_fvalue{std::numeric_limits<float>::quiet_NaN()};
   DefaultDirection best_direction{DefaultDirection::kLeftDir};
 
@@ -89,6 +90,7 @@ struct ScanComputedElem {
               GradientSumT parent_sum_in,
               float loss_chg_in,
               int32_t findex_in,
+              bool is_cat_in,
               float fvalue_in,
               DefaultDirection dir_in,
               const TrainingParam& param);
