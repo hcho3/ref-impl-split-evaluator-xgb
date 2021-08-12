@@ -17,20 +17,22 @@ inline bool IsCat(std::span<FeatureType const> ft, bst_feature_t fidx) {
   return !ft.empty() && ft[fidx] == FeatureType::kCategorical;
 }
 
+template <typename GradientSumT>
 struct EvaluateSplitInputs {
   int nidx;
-  GradientPair parent_sum;
+  GradientSumT parent_sum;
   TrainingParam param;
   std::span<const bst_feature_t> feature_set;
   std::span<FeatureType const> feature_types;
   std::span<const uint32_t> feature_segments;
   std::span<const float> feature_values;
   std::span<const float> min_fvalue;
-  std::span<const GradientPair> gradient_histogram;
+  std::span<const GradientSumT> gradient_histogram;
 };
 
+template <typename ParamT>
 struct SplitEvaluator {
-  double CalcSplitGain(const TrainingParam& param, bst_node_t,
+  double CalcSplitGain(const ParamT& param, bst_node_t,
                        bst_feature_t,
                        const GradStats& left,
                        const GradStats& right) const {
@@ -38,7 +40,7 @@ struct SplitEvaluator {
     return gain;
   }
 
-  double CalcGain(const TrainingParam&, const GradStats& stats) const {
+  double CalcGain(const ParamT&, const GradStats& stats) const {
     if (stats.sum_hess <= 0) {
       return 0.0;
     }
@@ -70,19 +72,21 @@ struct SplitCandidate {
   bool Update(const SplitCandidate& other, const TrainingParam& param);
 };
 
+template <typename GradientSumT>
 struct ScanComputedElem {
-  GradStats left_sum{0.0, 0.0};
-  GradStats right_sum{0.0, 0.0};
-  GradStats parent_sum{0.0, 0.0};
+  GradientSumT left_sum{0.0, 0.0};
+  GradientSumT right_sum{0.0, 0.0};
+  GradientSumT parent_sum{0.0, 0.0};
   float best_loss_chg{std::numeric_limits<float>::lowest()};
   int32_t best_findex{-1};
   float best_fvalue{std::numeric_limits<float>::quiet_NaN()};
   DefaultDirection best_direction{DefaultDirection::kLeftDir};
 
-  friend std::ostream& operator<<(std::ostream& os, const ScanComputedElem& m);
-  bool Update(GradStats left_sum_in,
-              GradStats right_sum_in,
-              GradStats parent_sum_in,
+  template <typename X>
+  friend std::ostream& operator<<(std::ostream& os, const ScanComputedElem<X>& m);
+  bool Update(GradientSumT left_sum_in,
+              GradientSumT right_sum_in,
+              GradientSumT parent_sum_in,
               float loss_chg_in,
               int32_t findex_in,
               float fvalue_in,
@@ -90,61 +94,80 @@ struct ScanComputedElem {
               const TrainingParam& param);
 };
 
+template <typename GradientSumT>
 struct ScanElem {
   ChildNodeIndicator indicator{ChildNodeIndicator::kLeftChild};
   uint64_t hist_idx;
-  GradientPair gpair{0.0, 0.0};
+  GradientSumT gpair{0.0, 0.0};
   int32_t findex{-1};
   float fvalue{std::numeric_limits<float>::quiet_NaN()};
   bool is_cat{false};
-  ScanComputedElem computed_result{};
+  ScanComputedElem<GradientSumT> computed_result{};
 
-  friend std::ostream& operator<<(std::ostream& os, const ScanElem& m);
+  template <typename X>
+  friend std::ostream& operator<<(std::ostream& os, const ScanElem<X>& m);
 };
 
+template <typename GradientSumT>
 struct ScanValueOp {
-  EvaluateSplitInputs left;
-  EvaluateSplitInputs right;
-  SplitEvaluator evaluator;
+  EvaluateSplitInputs<GradientSumT> left;
+  EvaluateSplitInputs<GradientSumT> right;
+  SplitEvaluator<TrainingParam> evaluator;
+
+  using ScanElemT = ScanElem<GradientSumT>;
 
   template <bool forward>
-  ScanElem MapEvaluateSplitsHistEntryToScanElem(EvaluateSplitsHistEntry entry,
-                                                EvaluateSplitInputs split_input);
-  thrust::tuple<ScanElem, ScanElem> operator()(
-      thrust::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup);
+  ScanElemT MapEvaluateSplitsHistEntryToScanElem(
+      EvaluateSplitsHistEntry entry,
+      EvaluateSplitInputs<GradientSumT> split_input);
+  thrust::tuple<ScanElemT, ScanElemT>
+  operator() (thrust::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup);
 };
 
+template <typename GradientSumT>
 struct ScanOp {
-  EvaluateSplitInputs left, right;
-  SplitEvaluator evaluator;
+  EvaluateSplitInputs<GradientSumT> left, right;
+  SplitEvaluator<TrainingParam> evaluator;
+
+  using ScanElemT = ScanElem<GradientSumT>;
 
   template<bool forward>
-  ScanElem DoIt(ScanElem lhs, ScanElem rhs);
-  thrust::tuple<ScanElem, ScanElem>
-  operator() (thrust::tuple<ScanElem, ScanElem> lhs, thrust::tuple<ScanElem, ScanElem> rhs);
+  ScanElem<GradientSumT> DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs);
+  thrust::tuple<ScanElemT, ScanElemT>
+  operator() (thrust::tuple<ScanElemT, ScanElemT> lhs, thrust::tuple<ScanElemT, ScanElemT> rhs);
 };
 
+template <typename GradientSumT>
 struct WriteScan {
-  EvaluateSplitInputs left, right;
-  SplitEvaluator evaluator;
-  std::span<ScanComputedElem> out_scan;
-  template <bool forward>
-  void DoIt(ScanElem e);
+  EvaluateSplitInputs<GradientSumT> left, right;
+  SplitEvaluator<TrainingParam> evaluator;
+  std::span<ScanComputedElem<GradientSumT>> out_scan;
 
-  thrust::tuple<ScanElem, ScanElem>
-  operator() (thrust::tuple<ScanElem, ScanElem> e);
+  using ScanElemT = ScanElem<GradientSumT>;
+
+  template <bool forward>
+  void DoIt(ScanElemT e);
+
+  thrust::tuple<ScanElemT, ScanElemT>
+  operator() (thrust::tuple<ScanElemT, ScanElemT> e);
 };
 
-std::vector<ScanComputedElem> EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator evaluator,
-                                                                     EvaluateSplitInputs left,
-                                                                     EvaluateSplitInputs right);
-void EvaluateSplits(std::span<SplitCandidate> out_splits,
-                    SplitEvaluator evaluator,
-                    EvaluateSplitInputs left,
-                    EvaluateSplitInputs right);
+template <typename GradientSumT>
+std::vector<ScanComputedElem<GradientSumT>>
+EvaluateSplitsFindOptimalSplitsViaScan(
+    SplitEvaluator<TrainingParam> evaluator,
+    EvaluateSplitInputs<GradientSumT> left,
+    EvaluateSplitInputs<GradientSumT> right);
 
+template <typename GradientSumT>
+void EvaluateSplits(std::span<SplitCandidate> out_splits,
+                    SplitEvaluator<TrainingParam> evaluator,
+                    EvaluateSplitInputs<GradientSumT> left,
+                    EvaluateSplitInputs<GradientSumT> right);
+
+template <typename GradientSumT>
 void EvaluateSingleSplit(std::span<SplitCandidate> out_split,
-                         SplitEvaluator evaluator,
-                         EvaluateSplitInputs input);
+                         SplitEvaluator<TrainingParam> evaluator,
+                         EvaluateSplitInputs<GradientSumT> input);
 
 #endif  // EVALUATOR_H_

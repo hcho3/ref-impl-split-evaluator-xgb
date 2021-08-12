@@ -22,32 +22,32 @@ struct EvaluateSplitsExample {
   std::vector<uint32_t> feature_segments;
   std::vector<float> feature_values;
   std::vector<float> feature_min_values;
-  std::vector<GradientPair> feature_histogram_left;
-  std::vector<GradientPair> feature_histogram_right;
-  GradientPair parent_sum;
+  std::vector<GradStats> feature_histogram_left;
+  std::vector<GradStats> feature_histogram_right;
+  GradStats parent_sum;
   TrainingParam param;
 };
 
-thrust::tuple<EvaluateSplitInputs, EvaluateSplitInputs>
+thrust::tuple<EvaluateSplitInputs<GradStats>, EvaluateSplitInputs<GradStats>>
 GetTreeStumpExample(EvaluateSplitsExample& data) {
   std::vector<bst_feature_t> feature_set{0, 1};
   std::vector<uint32_t> feature_segments{0, 2, 4};
   std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0};
   std::vector<float> feature_min_values{0.0, 0.0};
-  std::vector<GradientPair> feature_histogram_left{
+  std::vector<GradStats> feature_histogram_left{
       {-0.5, 0.5}, {0.5, 0.5}, {-1.0, 0.5}, {1.0, 0.5}
   };
-  std::vector<GradientPair> feature_histogram_right{
+  std::vector<GradStats> feature_histogram_right{
       {-1.0, 0.5}, {1.0, 0.5}, {-0.5, 0.5}, {0.5, 0.5}
   };
 
-  GradientPair parent_sum{0.0, 1.0};
+  GradStats parent_sum{0.0, 1.0};
   TrainingParam param{0.0f};
 
   data = {feature_set, feature_segments, feature_values, feature_min_values, feature_histogram_left,
           feature_histogram_right, parent_sum, param};
 
-  EvaluateSplitInputs left{
+  EvaluateSplitInputs<GradStats> left{
       1,
       data.parent_sum,
       data.param,
@@ -57,7 +57,7 @@ GetTreeStumpExample(EvaluateSplitsExample& data) {
       ToSpan(data.feature_values),
       ToSpan(data.feature_min_values),
       ToSpan(data.feature_histogram_left)};
-  EvaluateSplitInputs right{
+  EvaluateSplitInputs<GradStats> right{
       2,
       data.parent_sum,
       data.param,
@@ -73,7 +73,7 @@ GetTreeStumpExample(EvaluateSplitsExample& data) {
 
 void TestEvaluateSingleSplit(bool is_categorical) {
   std::vector<SplitCandidate> out_splits(1);
-  GradientPair parent_sum{0.0, 1.0};
+  GradStats parent_sum{0.0, 1.0};
   TrainingParam param{0.0f};
 
   std::vector<bst_feature_t> feature_set{0, 1};
@@ -81,12 +81,12 @@ void TestEvaluateSingleSplit(bool is_categorical) {
   std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0};
   std::vector<float> feature_min_values{0.0, 0.0};
   // Setup gradients so that second feature gets higher gain
-  std::vector<GradientPair> feature_histogram{
+  std::vector<GradStats> feature_histogram{
     {-0.5, 0.5}, {0.5, 0.5}, {-1.0, 0.5}, {1.0, 0.5}};
 
   std::vector<FeatureType> feature_types(feature_set.size(),
                                          FeatureType::kCategorical);
-  EvaluateSplitInputs input{
+  EvaluateSplitInputs<GradStats> input{
     1,
     parent_sum,
     param,
@@ -96,7 +96,7 @@ void TestEvaluateSingleSplit(bool is_categorical) {
     ToSpan(feature_values),
     ToSpan(feature_min_values),
     ToSpan(feature_histogram)};
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
 
   if (g_verbose_flag) {
@@ -113,26 +113,26 @@ void TestEvaluateSingleSplit(bool is_categorical) {
     EXPECT_EQ(result.fvalue, 12.0);
   }
   EXPECT_FLOAT_EQ(result.left_sum.sum_grad + result.right_sum.sum_grad,
-                  parent_sum.grad_);
+                  parent_sum.sum_grad);
   EXPECT_FLOAT_EQ(result.left_sum.sum_hess + result.right_sum.sum_hess,
-                  parent_sum.hess_);
+                  parent_sum.sum_hess);
 }
 
 void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
   std::vector<SplitCandidate> out_splits(1);
-  GradientPair parent_sum{1.0, 1.5};
+  GradStats parent_sum{1.0, 1.5};
   TrainingParam param;
 
   std::vector<bst_feature_t> feature_set{0};
   std::vector<uint32_t> feature_segments{0, 2};
   std::vector<float> feature_values{1.0, 2.0};
   std::vector<float> feature_min_values{0.0};
-  std::vector<GradientPair> feature_histogram{{-0.5, 0.5}, {0.5, 0.5}};
+  std::vector<GradStats> feature_histogram{{-0.5, 0.5}, {0.5, 0.5}};
   // The sum of gradient for the data points that lack a value for Feature 0 is (1.0, 0.5)
 
   std::vector<FeatureType> feature_types(feature_set.size(),
                                          FeatureType::kCategorical);
-  EvaluateSplitInputs input{
+  EvaluateSplitInputs<GradStats> input{
     1,
     parent_sum,
     param,
@@ -143,7 +143,7 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
     ToSpan(feature_min_values),
     ToSpan(feature_histogram)};
 
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
 
   if (g_verbose_flag) {
@@ -167,7 +167,7 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
     EXPECT_FLOAT_EQ(result.left_sum.sum_hess, 1.0);
     EXPECT_EQ(result.right_sum.sum_grad, -0.5);
     EXPECT_EQ(result.right_sum.sum_hess, 0.5);
-    EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.grad_) / parent_sum.hess_);
+    EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.sum_grad) / parent_sum.sum_hess);
   } else {
     EXPECT_EQ(result.fvalue, 1.0f);
     EXPECT_EQ(result.dir, DefaultDirection::kRightDir);
@@ -175,7 +175,7 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
     EXPECT_FLOAT_EQ(result.left_sum.sum_hess, 0.5);
     EXPECT_EQ(result.right_sum.sum_grad, 1.5);
     EXPECT_EQ(result.right_sum.sum_hess, 1.0);
-    EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.grad_) / parent_sum.hess_);
+    EXPECT_FLOAT_EQ(result.loss_chg, 2.75 - Sqr(parent_sum.sum_grad) / parent_sum.sum_hess);
   }
 }
 
@@ -184,8 +184,8 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
 TEST(EvaluateSplits, ScanValueOp) {
   EvaluateSplitsExample example;
   auto split_inputs = GetTreeStumpExample(example);
-  EvaluateSplitInputs left = thrust::get<0>(split_inputs);
-  EvaluateSplitInputs right = thrust::get<1>(split_inputs);
+  EvaluateSplitInputs<GradStats> left = thrust::get<0>(split_inputs);
+  EvaluateSplitInputs<GradStats> right = thrust::get<1>(split_inputs);
 
   auto map_to_left_right = [&left](uint64_t idx) {
     const auto left_hist_size = static_cast<uint64_t>(left.gradient_histogram.size());
@@ -206,9 +206,9 @@ TEST(EvaluateSplits, ScanValueOp) {
   auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
   auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   auto scan_input_iter = thrust::make_transform_iterator(
-      zip_loc_iter, ScanValueOp{left, right, evaluator});
+      zip_loc_iter, ScanValueOp<GradStats>{left, right, evaluator});
   for (std::size_t i = 0; i < size; ++i) {
     auto fw = thrust::get<0>(*scan_input_iter);
     auto bw = thrust::get<1>(*scan_input_iter);
@@ -220,12 +220,12 @@ TEST(EvaluateSplits, ScanValueOp) {
 }
 
 TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   EvaluateSplitsExample example;
   auto split_inputs = GetTreeStumpExample(example);
-  EvaluateSplitInputs left = thrust::get<0>(split_inputs);
-  EvaluateSplitInputs right = thrust::get<1>(split_inputs);
-  std::vector<ScanComputedElem> out_scan =
+  EvaluateSplitInputs<GradStats> left = thrust::get<0>(split_inputs);
+  EvaluateSplitInputs<GradStats> right = thrust::get<1>(split_inputs);
+  std::vector<ScanComputedElem<GradStats>> out_scan =
       EvaluateSplitsFindOptimalSplitsViaScan(evaluator, left, right);
   if (g_verbose_flag) {
     for (auto e : out_scan) {
@@ -290,7 +290,7 @@ TEST(EvaluateSplits, E2ETreeStump) {
   EvaluateSplitInputs left = thrust::get<0>(split_inputs);
   EvaluateSplitInputs right = thrust::get<1>(split_inputs);
   std::vector<SplitCandidate> out_splits(2);
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   EvaluateSplits(ToSpan(out_splits), evaluator, left, right);
 
   if (g_verbose_flag) {
@@ -342,8 +342,8 @@ TEST(EvaluateSplits, EvaluateSingleSplitEmpty) {
   std::vector<SplitCandidate> out_split(1);
   out_split[0] = nonzeroed;
 
-  SplitEvaluator evaluator;
-  EvaluateSingleSplit(ToSpan(out_split), evaluator, EvaluateSplitInputs{});
+  SplitEvaluator<TrainingParam> evaluator;
+  EvaluateSingleSplit(ToSpan(out_split), evaluator, EvaluateSplitInputs<GradStats>{});
 
   SplitCandidate result = out_split[0];
   EXPECT_EQ(result.findex, -1);
@@ -353,7 +353,7 @@ TEST(EvaluateSplits, EvaluateSingleSplitEmpty) {
 // Feature 0 produces the best split, but the algorithm must account for feature sampling
 TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
   std::vector<SplitCandidate> out_splits(2);
-  GradientPair parent_sum{0.0, 1.0};
+  GradStats parent_sum{0.0, 1.0};
   TrainingParam param{0.0f};
 
   std::vector<bst_feature_t> feature_set_left{2};
@@ -361,10 +361,10 @@ TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
   std::vector<uint32_t> feature_segments{0, 2, 4, 6};
   std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0, 100.0, 200.0};
   std::vector<float> feature_min_values{0.0, 10.0, 98.0};
-  std::vector<GradientPair> feature_histogram{
+  std::vector<GradStats> feature_histogram{
     {-10.0, 0.5}, {10.0, 0.5}, {-0.5, 0.5}, {0.5, 0.5}, {-1.0, 0.5}, {1.0, 0.5}
   };
-  EvaluateSplitInputs left{
+  EvaluateSplitInputs<GradStats> left{
     1,
     parent_sum,
     param,
@@ -374,7 +374,7 @@ TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
     ToSpan(feature_values),
     ToSpan(feature_min_values),
     ToSpan(feature_histogram)};
-  EvaluateSplitInputs right{
+  EvaluateSplitInputs<GradStats> right{
     2,
     parent_sum,
     param,
@@ -385,7 +385,7 @@ TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
     ToSpan(feature_min_values),
     ToSpan(feature_histogram)};
 
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   EvaluateSplits(ToSpan(out_splits), evaluator, left, right);
 
   EXPECT_EQ(out_splits[0].findex, 2);
@@ -416,16 +416,16 @@ TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
 // Features 0 and 1 have identical gain, the algorithm must select 0
 TEST(EvaluateSplits, EvaluateSingleSplitBreakTies) {
   std::vector<SplitCandidate> out_splits(1);
-  GradientPair parent_sum{0.0, 1.0};
+  GradStats parent_sum{0.0, 1.0};
   TrainingParam param{0.0f};
 
   std::vector<bst_feature_t> feature_set{0, 1};
   std::vector<uint32_t> feature_segments{0, 2, 4};
   std::vector<float> feature_values{1.0, 2.0, 11.0, 12.0};
   std::vector<float> feature_min_values{0.0, 10.0};
-  std::vector<GradientPair> feature_histogram{
+  std::vector<GradStats> feature_histogram{
     {-0.5, 0.5}, {0.5, 0.5}, {-0.5, 0.5}, {0.5, 0.5}};
-  EvaluateSplitInputs input{
+  EvaluateSplitInputs<GradStats> input{
     1,
     parent_sum,
     param,
@@ -436,7 +436,7 @@ TEST(EvaluateSplits, EvaluateSingleSplitBreakTies) {
     ToSpan(feature_min_values),
     ToSpan(feature_histogram)};
 
-  SplitEvaluator evaluator;
+  SplitEvaluator<TrainingParam> evaluator;
   EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
 
   SplitCandidate result = out_splits[0];
