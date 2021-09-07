@@ -35,41 +35,6 @@ TEST(Scan, InclusiveScan) {
   }
 }
 
-TEST(Scan, InclusiveScanByKey) {
-  std::size_t n_elem = 100;
-  std::size_t n_segments = 3;
-  std::vector<float> data(n_elem, 0);
-  thrust::sequence(data.begin(), data.end(), 0);
-
-  std::vector<std::size_t> segments(n_segments + 1, 0);
-  segments[1] = 10;
-  segments[2] = 66;
-  segments[3] = 100;
-
-  std::vector<float> out(n_elem, 0);
-
-  auto counting_iter = thrust::make_counting_iterator<std::size_t>(0);
-  auto key_iter = thrust::make_transform_iterator(counting_iter, [&segments](std::size_t idx) {
-    return SegmentId(segments.begin(), segments.end(), idx);
-  });
-  auto scan_op = [](float l, float r) {
-    return l + r;
-  };
-  InclusiveScanByKey(key_iter, data.begin(), out.begin(), scan_op, n_elem);
-
-  float s_0 = (0.0 + 9.0) * 10 / 2;
-  float s_1 = (10.0 + 65.0) * (65 - 10 + 1) / 2;
-  float s_2 = (66.0 + 99.0) * (99 - 66 + 1) / 2;
-
-  EXPECT_EQ(out[0], 0);
-  EXPECT_EQ(out[10], 10);
-  EXPECT_EQ(out[66], 66);
-
-  EXPECT_FLOAT_EQ(out[9], s_0);
-  EXPECT_FLOAT_EQ(out[65], s_1);
-  EXPECT_FLOAT_EQ(out[99], s_2);
-}
-
 namespace {
 
 struct SimpleSplitCandidate {
