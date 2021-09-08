@@ -96,8 +96,10 @@ EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator<TrainingParam> evaluator,
   auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
   auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 
+  std::vector<ScanComputedElem<GradientSumT>> scratch_area(size * 2);
   auto scan_input_iter = thrust::make_transform_iterator(
-      zip_loc_iter, ScanValueOp<GradientSumT>{left, right, evaluator});
+      zip_loc_iter,
+      ScanValueOp<GradientSumT>{left, right, evaluator, ToSpan(scratch_area)});
   std::vector<ScanComputedElem<GradientSumT>> out_scan(l_n_features + r_n_features);
   auto scan_out_iter = thrust::make_transform_output_iterator(
       thrust::make_discard_iterator(),
@@ -119,35 +121,47 @@ ScanValueOp<GradientSumT>::MapEvaluateSplitsHistEntryToScanElem(
   ret.findex = static_cast<int32_t>(SegmentId(split_input.feature_segments, entry.hist_idx));
   ret.fvalue = split_input.feature_values[entry.hist_idx];
   ret.is_cat = IsCat(split_input.feature_types, ret.findex);
+  {
+    std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
+    auto begin_ptr = scratch_area.begin()
+                     + (static_cast<std::ptrdiff_t>(size) * static_cast<int>(!forward))
+                     + (entry.indicator == ChildNodeIndicator::kRightChild ?
+                        left.gradient_histogram.size() : 0)
+                     + entry.hist_idx;
+    ret.computed_result = {begin_ptr, begin_ptr + 1};
+  }
+  ret.computed_result[0] = {};
   if ((forward && split_input.feature_segments[ret.findex] == entry.hist_idx) ||
       (!forward && split_input.feature_segments[ret.findex + 1] - 1 == entry.hist_idx)) {
     /**
      * For the element at the beginning of each segment, compute gradient sums and loss_chg
      * ahead of time. These will be later used by the inclusive scan operator.
      **/
+    GradientSumT left_sum, right_sum;
     if (ret.is_cat) {
-      ret.computed_result.left_sum = split_input.parent_sum - ret.gpair;
-      ret.computed_result.right_sum = ret.gpair;
+      left_sum = split_input.parent_sum - ret.gpair;
+      right_sum = ret.gpair;
     } else {
       if (forward) {
-        ret.computed_result.left_sum = ret.gpair;
-        ret.computed_result.right_sum = split_input.parent_sum - ret.gpair;
+        left_sum = ret.gpair;
+        right_sum = split_input.parent_sum - ret.gpair;
       } else {
-        ret.computed_result.left_sum = split_input.parent_sum - ret.gpair;
-        ret.computed_result.right_sum = ret.gpair;
+        left_sum = split_input.parent_sum - ret.gpair;
+        right_sum = ret.gpair;
       }
     }
-    ret.computed_result.best_left_sum = ret.computed_result.left_sum;
-    ret.computed_result.best_right_sum = ret.computed_result.right_sum;
-    ret.computed_result.parent_sum = split_input.parent_sum;
+    ret.computed_result[0].left_sum = left_sum;
+    ret.computed_result[0].right_sum = right_sum;
+    ret.computed_result[0].best_left_sum = left_sum;
+    ret.computed_result[0].best_right_sum = right_sum;
+    ret.computed_result[0].parent_sum = split_input.parent_sum;
     float parent_gain = evaluator.CalcGain(split_input.param, split_input.parent_sum);
     float gain = evaluator.CalcSplitGain(split_input.param, split_input.nidx, ret.findex,
-                                         ret.computed_result.left_sum,
-                                         ret.computed_result.right_sum);
-    ret.computed_result.best_loss_chg = gain - parent_gain;
-    ret.computed_result.best_findex = ret.findex;
-    ret.computed_result.best_fvalue = ret.fvalue;
-    ret.computed_result.best_direction =
+                                         left_sum, right_sum);
+    ret.computed_result[0].best_loss_chg = gain - parent_gain;
+    ret.computed_result[0].best_findex = ret.findex;
+    ret.computed_result[0].best_fvalue = ret.fvalue;
+    ret.computed_result[0].best_direction =
         (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir);
   }
 
@@ -176,7 +190,7 @@ ScanElem<GradientSumT>
 ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs) {
   ScanElem<GradientSumT> ret;
   ret = rhs;
-  ret.computed_result = {};
+  ScanComputedElem<GradientSumT> computed_result{};
   if (lhs.findex != rhs.findex || lhs.indicator != rhs.indicator) {
     // Segmented Scan
     return rhs;
@@ -193,18 +207,18 @@ ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rh
     return rhs;
   }
 
-  GradientSumT parent_sum = lhs.computed_result.parent_sum;
+  GradientSumT parent_sum = lhs.computed_result[0].parent_sum;
   GradientSumT left_sum, right_sum;
   if (lhs.is_cat) {
-    left_sum = lhs.computed_result.parent_sum - rhs.gpair;
+    left_sum = parent_sum - rhs.gpair;
     right_sum = rhs.gpair;
   } else {
     if (forward) {
-      left_sum = lhs.computed_result.left_sum + rhs.gpair;
-      right_sum = lhs.computed_result.parent_sum - left_sum;
+      left_sum = lhs.computed_result[0].left_sum + rhs.gpair;
+      right_sum = parent_sum - left_sum;
     } else {
-      right_sum = lhs.computed_result.right_sum + rhs.gpair;
-      left_sum = lhs.computed_result.parent_sum - right_sum;
+      right_sum = lhs.computed_result[0].right_sum + rhs.gpair;
+      left_sum = parent_sum - right_sum;
     }
   }
   bst_node_t nidx = (lhs.indicator == ChildNodeIndicator::kLeftChild) ? left.nidx : right.nidx;
@@ -212,11 +226,12 @@ ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rh
       left.param, nidx, lhs.findex, left_sum, right_sum);
   float parent_gain = evaluator.CalcGain(left.param, parent_sum);
   float loss_chg = gain - parent_gain;
-  ret.computed_result = lhs.computed_result;
-  ret.computed_result.Update(left_sum, right_sum, parent_sum,
-                             loss_chg, rhs.findex, rhs.is_cat, rhs.fvalue,
-                             (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir),
-                             left.param);
+  computed_result = lhs.computed_result[0];
+  computed_result.Update(left_sum, right_sum, parent_sum,
+                         loss_chg, rhs.findex, rhs.is_cat, rhs.fvalue,
+                         (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir),
+                         left.param);
+  ret.computed_result[0] = computed_result;
   return ret;
 }
 
@@ -245,8 +260,8 @@ WriteScan<GradientSumT>::DoIt(ScanElem<GradientSumT> e) {
   }
   if ((!forward && split_input.feature_segments[e.findex] == e.hist_idx) ||
       (forward && split_input.feature_segments[e.findex + 1] - 1 == e.hist_idx)) {
-    if (e.computed_result.best_loss_chg > out_scan[offset + e.findex].best_loss_chg) {
-      out_scan[offset + e.findex] = e.computed_result;
+    if (e.computed_result[0].best_loss_chg > out_scan[offset + e.findex].best_loss_chg) {
+      out_scan[offset + e.findex] = e.computed_result[0];
     }
   }
 }
@@ -329,7 +344,7 @@ std::ostream& operator<<(std::ostream& os, const ScanElem<GradientSumT>& m) {
   os << "(indicator: " << indicator_str << ", hist_idx: " << m.hist_idx
      << ", findex: " << m.findex<< ", gpair: " << m.gpair << ", fvalue: " << m.fvalue
      << ", is_cat: " << (m.is_cat ? "true" : "false")
-     << ", computed_result: " << m.computed_result << ")";
+     << ", computed_result: " << m.computed_result[0] << ")";
   return os;
 }
 

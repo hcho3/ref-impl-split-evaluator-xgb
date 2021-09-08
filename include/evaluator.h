@@ -106,7 +106,7 @@ struct ScanElem {
   int32_t findex{-1};
   float fvalue{std::numeric_limits<float>::quiet_NaN()};
   bool is_cat{false};
-  ScanComputedElem<GradientSumT> computed_result{};
+  std::span<ScanComputedElem<GradientSumT>> computed_result{};
 
   template <typename X>
   friend std::ostream& operator<<(std::ostream& os, const ScanElem<X>& m);
@@ -117,6 +117,7 @@ struct ScanValueOp {
   EvaluateSplitInputs<GradientSumT> left;
   EvaluateSplitInputs<GradientSumT> right;
   SplitEvaluator<TrainingParam> evaluator;
+  std::span<ScanComputedElem<GradientSumT>> scratch_area;
 
   using ScanElemT = ScanElem<GradientSumT>;
 
