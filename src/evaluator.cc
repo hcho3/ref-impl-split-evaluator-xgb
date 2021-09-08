@@ -47,7 +47,7 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
       [&out_scan](std::size_t i) {
         ScanComputedElem<GradientSumT> c = out_scan.at(i);
         return SplitCandidate{c.best_loss_chg, c.best_direction, c.best_findex,
-                              c.best_fvalue, c.is_cat, c.left_sum, c.right_sum};
+                              c.best_fvalue, c.is_cat, c.best_left_sum, c.best_right_sum};
       });
   thrust::reduce_by_key(
       reduce_key, reduce_key + static_cast<std::ptrdiff_t>(out_scan.size()), reduce_val,
@@ -137,6 +137,8 @@ ScanValueOp<GradientSumT>::MapEvaluateSplitsHistEntryToScanElem(
         ret.computed_result.right_sum = ret.gpair;
       }
     }
+    ret.computed_result.best_left_sum = ret.computed_result.left_sum;
+    ret.computed_result.best_right_sum = ret.computed_result.right_sum;
     ret.computed_result.parent_sum = split_input.parent_sum;
     float parent_gain = evaluator.CalcGain(split_input.param, split_input.parent_sum);
     float gain = evaluator.CalcSplitGain(split_input.param, split_input.nidx, ret.findex,
@@ -212,7 +214,7 @@ ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rh
   float loss_chg = gain - parent_gain;
   ret.computed_result = lhs.computed_result;
   ret.computed_result.Update(left_sum, right_sum, parent_sum,
-                             loss_chg, lhs.findex, lhs.is_cat, lhs.fvalue,
+                             loss_chg, rhs.findex, rhs.is_cat, rhs.fvalue,
                              (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir),
                              left.param);
   return ret;
@@ -272,6 +274,9 @@ ScanComputedElem<GradientSumT>::Update(
     float fvalue_in,
     DefaultDirection dir_in,
     const TrainingParam& param) {
+  left_sum = left_sum_in;
+  right_sum = right_sum_in;
+  parent_sum = parent_sum_in;
   if (loss_chg_in > best_loss_chg &&
       left_sum_in.sum_hess >= param.min_child_weight &&
       right_sum_in.sum_hess >= param.min_child_weight) {
@@ -280,9 +285,8 @@ ScanComputedElem<GradientSumT>::Update(
     is_cat = is_cat_in;
     best_fvalue = fvalue_in;
     best_direction = dir_in;
-    left_sum = left_sum_in;
-    right_sum = right_sum_in;
-    parent_sum = parent_sum_in;
+    best_left_sum = left_sum_in;
+    best_right_sum = right_sum_in;
     return true;
   }
   return false;
@@ -311,7 +315,8 @@ std::ostream& operator<<(std::ostream& os, const ScanComputedElem<GradientSumT>&
   std::string best_direction_str =
       (m.best_direction == DefaultDirection::kLeftDir) ? "left" : "right";
   os << "(left_sum: " << m.left_sum << ", right_sum: " << m.right_sum
-     << ", parent_sum: " << m.parent_sum << ", best_loss_chg: " << m.best_loss_chg
+     << ", parent_sum: " << m.parent_sum << ", best_left_sum: " << m.best_left_sum
+     << ", best_right_sum: " << m.best_right_sum << ", best_loss_chg: " << m.best_loss_chg
      << ", best_findex: " << m.best_findex << ", best_fvalue: " << m.best_fvalue
      << ", best_direction: " << best_direction_str << ")";
   return os;

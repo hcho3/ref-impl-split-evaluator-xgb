@@ -112,10 +112,6 @@ void TestEvaluateSingleSplit(bool is_categorical) {
   } else {
     EXPECT_EQ(result.fvalue, 12.0);
   }
-  EXPECT_FLOAT_EQ(result.left_sum.sum_grad + result.right_sum.sum_grad,
-                  parent_sum.sum_grad);
-  EXPECT_FLOAT_EQ(result.left_sum.sum_hess + result.right_sum.sum_hess,
-                  parent_sum.sum_hess);
 }
 
 void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
@@ -241,17 +237,17 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   } else {
     EXPECT_EQ(out_scan[0].best_fvalue, 2.0f);
   }
-  EXPECT_FLOAT_EQ(out_scan[0].left_sum.sum_grad, -0.5);
-  EXPECT_FLOAT_EQ(out_scan[0].left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[0].right_sum.sum_grad, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[0].right_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[0].best_left_sum.sum_grad, -0.5);
+  EXPECT_FLOAT_EQ(out_scan[0].best_left_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[0].best_right_sum.sum_grad, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[0].best_right_sum.sum_hess, 0.5);
 
   EXPECT_FLOAT_EQ(out_scan[1].best_loss_chg, 4.0f);
   EXPECT_EQ(out_scan[1].best_findex, 1);
-  EXPECT_FLOAT_EQ(out_scan[1].left_sum.sum_grad, -1.0);
-  EXPECT_FLOAT_EQ(out_scan[1].left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[1].right_sum.sum_grad, 1.0);
-  EXPECT_FLOAT_EQ(out_scan[1].right_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[1].best_left_sum.sum_grad, -1.0);
+  EXPECT_FLOAT_EQ(out_scan[1].best_left_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[1].best_right_sum.sum_grad, 1.0);
+  EXPECT_FLOAT_EQ(out_scan[1].best_right_sum.sum_hess, 0.5);
   if (out_scan[1].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[1].best_fvalue, 11.0f);
   } else {
@@ -261,10 +257,10 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   // Right child
   EXPECT_FLOAT_EQ(out_scan[2].best_loss_chg, 4.0f);
   EXPECT_EQ(out_scan[2].best_findex, 0);
-  EXPECT_FLOAT_EQ(out_scan[2].left_sum.sum_grad, -1.0);
-  EXPECT_FLOAT_EQ(out_scan[2].left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[2].right_sum.sum_grad, 1.0);
-  EXPECT_FLOAT_EQ(out_scan[2].right_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[2].best_left_sum.sum_grad, -1.0);
+  EXPECT_FLOAT_EQ(out_scan[2].best_left_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[2].best_right_sum.sum_grad, 1.0);
+  EXPECT_FLOAT_EQ(out_scan[2].best_right_sum.sum_hess, 0.5);
   if (out_scan[2].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[2].best_fvalue, 1.0f);
   } else {
@@ -273,10 +269,10 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
 
   EXPECT_FLOAT_EQ(out_scan[3].best_loss_chg, 1.0f);
   EXPECT_EQ(out_scan[3].best_findex, 1);
-  EXPECT_FLOAT_EQ(out_scan[3].left_sum.sum_grad, -0.5);
-  EXPECT_FLOAT_EQ(out_scan[3].left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[3].right_sum.sum_grad, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[3].right_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[3].best_left_sum.sum_grad, -0.5);
+  EXPECT_FLOAT_EQ(out_scan[3].best_left_sum.sum_hess, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[3].best_right_sum.sum_grad, 0.5);
+  EXPECT_FLOAT_EQ(out_scan[3].best_right_sum.sum_hess, 0.5);
   if (out_scan[3].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[3].best_fvalue, 11.0f);
   } else {
@@ -442,4 +438,48 @@ TEST(EvaluateSplits, EvaluateSingleSplitBreakTies) {
   SplitCandidate result = out_splits[0];
   EXPECT_EQ(result.findex, 0);
   EXPECT_EQ(result.fvalue, 1.0);
+}
+
+TEST(EvaluateSplits, E2ETreeStumpSecondExample) {
+  std::vector<SplitCandidate> out_splits(1);
+  GradStats parent_sum{6.4, 12.8};
+  TrainingParam param{0.01f};
+
+  std::vector<bst_feature_t> feature_set{0, 1, 2, 3, 4, 5, 6, 7};
+  std::vector<uint32_t> feature_segments{0, 3, 6, 9, 12, 15, 18, 21, 24};
+  std::vector<float> feature_values{0.30f, 0.67f, 1.64f,
+                                    0.32f, 0.77f, 1.95f,
+                                    0.29f, 0.70f, 1.80f,
+                                    0.32f, 0.75f, 1.85f,
+                                    0.18f, 0.59f, 1.69f,
+                                    0.25f, 0.74f, 2.00f,
+                                    0.26f, 0.74f, 1.98f,
+                                    0.26f, 0.71f, 1.83f};
+  std::vector<float> feature_min_values{0.1f, 0.2f, 0.3f, 0.1f, 0.2f, 0.3f, 0.2f, 0.2f};
+  std::vector<GradStats> feature_histogram{
+      {0.8314f, 0.7147f}, {1.7989f, 3.7312f}, {3.3846f, 3.4598f},
+      {2.9277f, 3.5886f}, {1.8429f, 2.4152f}, {1.2443f, 1.9019f},
+      {1.6380f, 2.9174f}, {1.5657f, 2.5107f}, {2.8111f, 2.4776f},
+      {2.1322f, 3.0651f}, {3.2927f, 3.8540f}, {0.5899f, 0.9866f},
+      {1.5185f, 1.6263f}, {2.0686f, 3.1844f}, {2.4278f, 3.0950f},
+      {1.5105f, 2.1403f}, {2.6922f, 4.2217f}, {1.8122f, 1.5437f},
+      {0.0000f, 0.0000f}, {4.3245f, 5.7955f}, {1.6903f, 2.1103f},
+      {2.4012f, 4.4754f}, {3.6136f, 3.4303f}, {0.0000f, 0.0000f}};
+  EvaluateSplitInputs<GradStats> input{
+      1,
+      parent_sum,
+      param,
+      ToSpan(feature_set),
+      {},
+      ToSpan(feature_segments),
+      ToSpan(feature_values),
+      ToSpan(feature_min_values),
+      ToSpan(feature_histogram)};
+
+  SplitEvaluator<TrainingParam> evaluator;
+  EvaluateSingleSplit(ToSpan(out_splits), evaluator, input);
+
+  SplitCandidate result = out_splits[0];
+  EXPECT_EQ(result.findex, 7);
+  EXPECT_FLOAT_EQ(result.fvalue, 0.71f);
 }

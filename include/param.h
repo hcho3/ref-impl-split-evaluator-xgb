@@ -33,7 +33,7 @@ struct GradientPair {
   }
 
   friend std::ostream& operator<<(std::ostream& os, const GradientPair& m) {
-    os << "(grad_: " << m.grad_ << ", hess_: " << m.hess_ << ")";
+    os << m.grad_ << "/" << m.hess_;
     return os;
   }
 };
@@ -55,7 +55,7 @@ struct GradStats {
   }
 
   friend std::ostream& operator<<(std::ostream& os, const GradStats& m) {
-    os << "(sum_grad: " << m.sum_grad << ", sum_hess: " << m.sum_hess << ")";
+    os << m.sum_grad << "/" << m.sum_hess;
     return os;
   }
 };
