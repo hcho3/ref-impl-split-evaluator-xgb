@@ -65,7 +65,7 @@ enum class FeatureType : uint8_t {
   kCategorical
 };
 
-enum DefaultDirection {
+enum class DefaultDirection : uint8_t {
   kLeftDir = 0,
   kRightDir
 };

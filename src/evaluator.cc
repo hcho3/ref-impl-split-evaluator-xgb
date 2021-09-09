@@ -8,7 +8,6 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/reverse_iterator.h>
 #include <thrust/iterator/transform_output_iterator.h>
-#include <thrust/tuple.h>
 #include <cstddef>
 #include <algorithm>
 #include <ostream>
@@ -46,8 +45,21 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
       thrust::make_counting_iterator<std::size_t>(0),
       [&out_scan](std::size_t i) {
         ScanComputedElem<GradientSumT> c = out_scan.at(i);
+        GradientSumT left_sum, right_sum;
+        if (c.is_cat) {
+          left_sum = c.parent_sum - c.best_partial_sum;
+          right_sum = c.best_partial_sum;
+        } else {
+          if (c.best_direction == DefaultDirection::kRightDir) {
+            left_sum = c.best_partial_sum;
+            right_sum = c.parent_sum - c.best_partial_sum;
+          } else {
+            left_sum = c.parent_sum - c.best_partial_sum;
+            right_sum = c.best_partial_sum;
+          }
+        }
         return SplitCandidate{c.best_loss_chg, c.best_direction, c.best_findex,
-                              c.best_fvalue, c.is_cat, c.best_left_sum, c.best_right_sum};
+                              c.best_fvalue, c.is_cat, left_sum, right_sum};
       });
   thrust::reduce_by_key(
       reduce_key, reduce_key + static_cast<std::ptrdiff_t>(out_scan.size()), reduce_val,
@@ -77,43 +89,51 @@ EvaluateSplitsFindOptimalSplitsViaScan(SplitEvaluator<TrainingParam> evaluator,
     throw std::runtime_error("Invariant violated");
   }
 
-  auto map_to_left_right = [&left](uint64_t idx) {
-    const auto left_hist_size = static_cast<uint64_t>(left.gradient_histogram.size());
+  auto map_to_hist_bin = [&left](uint32_t idx) {
+    const auto left_hist_size = static_cast<uint32_t>(left.gradient_histogram.size());
     if (idx < left_hist_size) {
       // Left child node
-      return EvaluateSplitsHistEntry{ChildNodeIndicator::kLeftChild, idx};
+      return EvaluateSplitsHistEntry{0, idx};
     } else {
       // Right child node
-      return EvaluateSplitsHistEntry{ChildNodeIndicator::kRightChild, idx - left_hist_size};
+      return EvaluateSplitsHistEntry{1, idx - left_hist_size};
     }
   };
 
   std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
-  auto for_count_iter = thrust::make_counting_iterator<uint64_t>(0);
-  auto for_loc_iter = thrust::make_transform_iterator(for_count_iter, map_to_left_right);
-  auto rev_count_iter = thrust::make_reverse_iterator(
-      thrust::make_counting_iterator<uint64_t>(0) + static_cast<std::ptrdiff_t>(size));
-  auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
-  auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
+  auto forward_count_iter = thrust::make_counting_iterator<uint32_t>(0);
+  auto forward_bin_iter = thrust::make_transform_iterator(forward_count_iter, map_to_hist_bin);
+  auto forward_scan_input_iter = thrust::make_transform_iterator(
+      forward_bin_iter, ScanValueOp<GradientSumT>{true, left, right, evaluator});
 
-  auto scan_input_iter = thrust::make_transform_iterator(
-      zip_loc_iter, ScanValueOp<GradientSumT>{left, right, evaluator});
   std::vector<ScanComputedElem<GradientSumT>> out_scan(l_n_features + r_n_features);
-  auto scan_out_iter = thrust::make_transform_output_iterator(
+  auto forward_scan_out_iter = thrust::make_transform_output_iterator(
       thrust::make_discard_iterator(),
-      WriteScan<GradientSumT>{left, right, evaluator, ToSpan(out_scan)});
-  InclusiveScan(scan_input_iter, scan_out_iter, ScanOp<GradientSumT>{left, right, evaluator}, size);
+      WriteScan<GradientSumT>{true, left, right, evaluator, ToSpan(out_scan)});
+  InclusiveScan(forward_scan_input_iter, forward_scan_out_iter,
+                ScanOp<GradientSumT>{true, left, right, evaluator}, size);
+
+  auto backward_count_iter = thrust::make_reverse_iterator(
+      thrust::make_counting_iterator<uint32_t>(0) + static_cast<std::ptrdiff_t>(size));
+  auto backward_bin_iter = thrust::make_transform_iterator(backward_count_iter, map_to_hist_bin);
+  auto backward_scan_input_iter = thrust::make_transform_iterator(
+      backward_bin_iter, ScanValueOp<GradientSumT>{false, left, right, evaluator});
+  auto backward_scan_out_iter = thrust::make_transform_output_iterator(
+      thrust::make_discard_iterator(),
+      WriteScan<GradientSumT>{false, left, right, evaluator, ToSpan(out_scan)});
+  InclusiveScan(backward_scan_input_iter, backward_scan_out_iter,
+                ScanOp<GradientSumT>{false, left, right, evaluator}, size);
+
   return out_scan;
 }
 
 template <typename GradientSumT>
-template <bool forward>
 ScanElem<GradientSumT>
 ScanValueOp<GradientSumT>::MapEvaluateSplitsHistEntryToScanElem(
     EvaluateSplitsHistEntry entry,
     EvaluateSplitInputs<GradientSumT> split_input) {
   ScanElem<GradientSumT> ret;
-  ret.indicator = entry.indicator;
+  ret.node_idx = entry.node_idx;
   ret.hist_idx = entry.hist_idx;
   ret.gpair = split_input.gradient_histogram[entry.hist_idx];
   ret.findex = static_cast<int32_t>(SegmentId(split_input.feature_segments, entry.hist_idx));
@@ -125,67 +145,60 @@ ScanValueOp<GradientSumT>::MapEvaluateSplitsHistEntryToScanElem(
      * For the element at the beginning of each segment, compute gradient sums and loss_chg
      * ahead of time. These will be later used by the inclusive scan operator.
      **/
+    GradientSumT partial_sum = ret.gpair;
+    GradientSumT complement_sum = split_input.parent_sum - partial_sum;
+    GradientSumT *left_sum, *right_sum;
     if (ret.is_cat) {
-      ret.computed_result.left_sum = split_input.parent_sum - ret.gpair;
-      ret.computed_result.right_sum = ret.gpair;
+      left_sum = &complement_sum;
+      right_sum = &partial_sum;
     } else {
       if (forward) {
-        ret.computed_result.left_sum = ret.gpair;
-        ret.computed_result.right_sum = split_input.parent_sum - ret.gpair;
+        left_sum = &partial_sum;
+        right_sum = &complement_sum;
       } else {
-        ret.computed_result.left_sum = split_input.parent_sum - ret.gpair;
-        ret.computed_result.right_sum = ret.gpair;
+        left_sum = &complement_sum;
+        right_sum = &partial_sum;
       }
     }
-    ret.computed_result.best_left_sum = ret.computed_result.left_sum;
-    ret.computed_result.best_right_sum = ret.computed_result.right_sum;
+    ret.computed_result.parent_sum = partial_sum;
+    ret.computed_result.best_partial_sum = partial_sum;
     ret.computed_result.parent_sum = split_input.parent_sum;
     float parent_gain = evaluator.CalcGain(split_input.param, split_input.parent_sum);
     float gain = evaluator.CalcSplitGain(split_input.param, split_input.nidx, ret.findex,
-                                         ret.computed_result.left_sum,
-                                         ret.computed_result.right_sum);
+                                         *left_sum, *right_sum);
     ret.computed_result.best_loss_chg = gain - parent_gain;
     ret.computed_result.best_findex = ret.findex;
     ret.computed_result.best_fvalue = ret.fvalue;
     ret.computed_result.best_direction =
         (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir);
+    ret.computed_result.is_cat = ret.is_cat;
   }
 
   return ret;
 }
 
 template <typename GradientSumT>
-thrust::tuple<ScanElem<GradientSumT>, ScanElem<GradientSumT>>
-ScanValueOp<GradientSumT>::operator() (
-    thrust::tuple<EvaluateSplitsHistEntry, EvaluateSplitsHistEntry> entry_tup) {
-  const auto& fw = thrust::get<0>(entry_tup);
-  const auto& bw = thrust::get<1>(entry_tup);
-  ScanElem<GradientSumT> ret_fw, ret_bw;
-  ret_fw = MapEvaluateSplitsHistEntryToScanElem<true>(
-      fw,
-      (fw.indicator == ChildNodeIndicator::kLeftChild ? this->left : this->right));
-  ret_bw = MapEvaluateSplitsHistEntryToScanElem<false>(
-      bw,
-      (bw.indicator == ChildNodeIndicator::kLeftChild ? this->left : this->right));
-  return thrust::make_tuple(ret_fw, ret_bw);
+ScanElem<GradientSumT>
+ScanValueOp<GradientSumT>::operator() (EvaluateSplitsHistEntry entry) {
+  return MapEvaluateSplitsHistEntryToScanElem(
+      entry, (entry.node_idx == 0 ? this->left : this->right));
 }
 
 template <typename GradientSumT>
-template <bool forward>
 ScanElem<GradientSumT>
 ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs) {
   ScanElem<GradientSumT> ret;
   ret = rhs;
   ret.computed_result = {};
-  if (lhs.findex != rhs.findex || lhs.indicator != rhs.indicator) {
+  if (lhs.findex != rhs.findex || lhs.node_idx != rhs.node_idx) {
     // Segmented Scan
     return rhs;
   }
-  if (((lhs.indicator == ChildNodeIndicator::kLeftChild) &&
+  if (((lhs.node_idx == 0) &&
        (left.feature_set.size() != left.feature_segments.size()) &&
        !std::binary_search(left.feature_set.begin(),
                            left.feature_set.end(), lhs.findex)) ||
-      ((lhs.indicator == ChildNodeIndicator::kRightChild) &&
+      ((lhs.node_idx == 1) &&
        (right.feature_set.size() != right.feature_segments.size()) &&
        !std::binary_search(right.feature_set.begin(),
                            right.feature_set.end(), lhs.findex))) {
@@ -194,53 +207,48 @@ ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rh
   }
 
   GradientSumT parent_sum = lhs.computed_result.parent_sum;
-  GradientSumT left_sum, right_sum;
+  GradientSumT partial_sum, complement_sum;
+  GradientSumT *left_sum, *right_sum;
   if (lhs.is_cat) {
-    left_sum = lhs.computed_result.parent_sum - rhs.gpair;
-    right_sum = rhs.gpair;
+    partial_sum = rhs.gpair;
+    complement_sum = lhs.computed_result.parent_sum - rhs.gpair;
+    left_sum = &complement_sum;
+    right_sum = &partial_sum;
   } else {
+    partial_sum = lhs.computed_result.partial_sum + rhs.gpair;
+    complement_sum = parent_sum - partial_sum;
     if (forward) {
-      left_sum = lhs.computed_result.left_sum + rhs.gpair;
-      right_sum = lhs.computed_result.parent_sum - left_sum;
+      left_sum = &partial_sum;
+      right_sum = &complement_sum;
     } else {
-      right_sum = lhs.computed_result.right_sum + rhs.gpair;
-      left_sum = lhs.computed_result.parent_sum - right_sum;
+      left_sum = &complement_sum;
+      right_sum = &partial_sum;
     }
   }
-  bst_node_t nidx = (lhs.indicator == ChildNodeIndicator::kLeftChild) ? left.nidx : right.nidx;
-  float gain = evaluator.CalcSplitGain(
-      left.param, nidx, lhs.findex, left_sum, right_sum);
+  bst_node_t nidx = (lhs.node_idx == 0) ? left.nidx : right.nidx;
+  float gain = evaluator.CalcSplitGain(left.param, nidx, lhs.findex, *left_sum, *right_sum);
   float parent_gain = evaluator.CalcGain(left.param, parent_sum);
   float loss_chg = gain - parent_gain;
   ret.computed_result = lhs.computed_result;
-  ret.computed_result.Update(left_sum, right_sum, parent_sum,
-                             loss_chg, rhs.findex, rhs.is_cat, rhs.fvalue,
+  ret.computed_result.Update(partial_sum, parent_sum, loss_chg, rhs.findex, rhs.is_cat, rhs.fvalue,
                              (forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir),
                              left.param);
   return ret;
 }
 
 template <typename GradientSumT>
-thrust::tuple<ScanElem<GradientSumT>, ScanElem<GradientSumT>>
-ScanOp<GradientSumT>::operator() (
-    thrust::tuple<ScanElem<GradientSumT>, ScanElem<GradientSumT>> lhs,
-    thrust::tuple<ScanElem<GradientSumT>, ScanElem<GradientSumT>> rhs) {
-  const auto& lhs_fw = thrust::get<0>(lhs);
-  const auto& lhs_bw = thrust::get<1>(lhs);
-  const auto& rhs_fw = thrust::get<0>(rhs);
-  const auto& rhs_bw = thrust::get<1>(rhs);
-  return thrust::make_tuple(DoIt<true>(lhs_fw, rhs_fw), DoIt<false>(lhs_bw, rhs_bw));
+ScanElem<GradientSumT>
+ScanOp<GradientSumT>::operator() (ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs) {
+  return DoIt(lhs, rhs);
 };
 
 template <typename GradientSumT>
-template <bool forward>
 void
 WriteScan<GradientSumT>::DoIt(ScanElem<GradientSumT> e) {
-  EvaluateSplitInputs<GradientSumT>& split_input =
-      (e.indicator == ChildNodeIndicator::kLeftChild) ? left : right;
+  EvaluateSplitInputs<GradientSumT>& split_input = (e.node_idx == 0) ? left : right;
   std::size_t offset = 0;
   std::size_t n_features = left.feature_segments.empty() ? 0 : left.feature_segments.size() - 1;
-  if (e.indicator == ChildNodeIndicator::kRightChild) {
+  if (e.node_idx == 1) {
     offset = n_features;
   }
   if ((!forward && split_input.feature_segments[e.findex] == e.hist_idx) ||
@@ -252,21 +260,16 @@ WriteScan<GradientSumT>::DoIt(ScanElem<GradientSumT> e) {
 }
 
 template <typename GradientSumT>
-thrust::tuple<ScanElem<GradientSumT>, ScanElem<GradientSumT>>
-WriteScan<GradientSumT>::operator() (
-    thrust::tuple<ScanElem<GradientSumT>, ScanElem<GradientSumT>> e) {
-  const auto& fw = thrust::get<0>(e);
-  const auto& bw = thrust::get<1>(e);
-  DoIt<true>(fw);
-  DoIt<false>(bw);
+ScanElem<GradientSumT>
+WriteScan<GradientSumT>::operator() (ScanElem<GradientSumT> e) {
+  DoIt(e);
   return {};  // discard
 }
 
 template <typename GradientSumT>
 bool
 ScanComputedElem<GradientSumT>::Update(
-    GradientSumT left_sum_in,
-    GradientSumT right_sum_in,
+    GradientSumT partial_sum_in,
     GradientSumT parent_sum_in,
     float loss_chg_in,
     int32_t findex_in,
@@ -274,19 +277,17 @@ ScanComputedElem<GradientSumT>::Update(
     float fvalue_in,
     DefaultDirection dir_in,
     const TrainingParam& param) {
-  left_sum = left_sum_in;
-  right_sum = right_sum_in;
+  partial_sum = partial_sum_in;
   parent_sum = parent_sum_in;
   if (loss_chg_in > best_loss_chg &&
-      left_sum_in.sum_hess >= param.min_child_weight &&
-      right_sum_in.sum_hess >= param.min_child_weight) {
+      partial_sum_in.sum_hess >= param.min_child_weight &&
+      (parent_sum_in.sum_hess - partial_sum_in.sum_hess) >= param.min_child_weight) {
     best_loss_chg = loss_chg_in;
     best_findex = findex_in;
     is_cat = is_cat_in;
     best_fvalue = fvalue_in;
     best_direction = dir_in;
-    best_left_sum = left_sum_in;
-    best_right_sum = right_sum_in;
+    best_partial_sum = partial_sum_in;
     return true;
   }
   return false;
@@ -304,9 +305,7 @@ SplitCandidate::Update(const SplitCandidate& other, const TrainingParam& param) 
 }
 
 std::ostream& operator<<(std::ostream& os, const EvaluateSplitsHistEntry& m) {
-  std::string indicator_str =
-      (m.indicator == ChildNodeIndicator::kLeftChild) ? "kLeftChild" : "kRightChild";
-  os << "(indicator: " << indicator_str << ", hist_idx: " << m.hist_idx << ")";
+  os << "(node_idx: " << m.node_idx << ", hist_idx: " << m.hist_idx << ")";
   return os;
 }
 
@@ -314,27 +313,24 @@ template <typename GradientSumT>
 std::ostream& operator<<(std::ostream& os, const ScanComputedElem<GradientSumT>& m) {
   std::string best_direction_str =
       (m.best_direction == DefaultDirection::kLeftDir) ? "left" : "right";
-  os << "(left_sum: " << m.left_sum << ", right_sum: " << m.right_sum
-     << ", parent_sum: " << m.parent_sum << ", best_left_sum: " << m.best_left_sum
-     << ", best_right_sum: " << m.best_right_sum << ", best_loss_chg: " << m.best_loss_chg
-     << ", best_findex: " << m.best_findex << ", best_fvalue: " << m.best_fvalue
-     << ", best_direction: " << best_direction_str << ")";
+  os << "(is_cat: " << (m.is_cat ? "true" : "false") << ", best_direction: " << best_direction_str
+     << ", best_findex: " << m.best_findex << ", best_loss_chg: " << m.best_loss_chg
+     << ", best_fvalue: " << m.best_fvalue << ", partial_sum: " << m.partial_sum
+     << ", best_partial_sum: " << m.best_partial_sum << ", parent_sum: " << m.parent_sum << ")";
   return os;
 }
 
 template <typename GradientSumT>
 std::ostream& operator<<(std::ostream& os, const ScanElem<GradientSumT>& m) {
-  std::string indicator_str =
-      (m.indicator == ChildNodeIndicator::kLeftChild) ? "kLeftChild" : "kRightChild";
-  os << "(indicator: " << indicator_str << ", hist_idx: " << m.hist_idx
-     << ", findex: " << m.findex<< ", gpair: " << m.gpair << ", fvalue: " << m.fvalue
+  os << "(node_idx: " << m.node_idx << ", hist_idx: " << m.hist_idx
+     << ", gpair: " << m.gpair << ", findex: " << m.findex << ", fvalue: " << m.fvalue
      << ", is_cat: " << (m.is_cat ? "true" : "false")
      << ", computed_result: " << m.computed_result << ")";
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const SplitCandidate& m) {
-  std::string dir_s = (m.dir == kLeftDir) ? "left" : "right";
+  std::string dir_s = (m.dir == DefaultDirection::kLeftDir) ? "left" : "right";
   os << "(loss_chg: " << m.loss_chg << ", dir: " << dir_s << ", findex: " << m.findex
      << ", fvalue: " << m.fvalue << ", is_cat: " << m.is_cat << ", left_sum: " << m.left_sum
      << ", right_sum: " << m.right_sum << ")";

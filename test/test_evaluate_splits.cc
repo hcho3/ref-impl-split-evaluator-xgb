@@ -126,8 +126,7 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
   std::vector<GradStats> feature_histogram{{-0.5, 0.5}, {0.5, 0.5}};
   // The sum of gradient for the data points that lack a value for Feature 0 is (1.0, 0.5)
 
-  std::vector<FeatureType> feature_types(feature_set.size(),
-                                         FeatureType::kCategorical);
+  std::vector<FeatureType> feature_types(feature_set.size(), FeatureType::kCategorical);
   EvaluateSplitInputs<GradStats> input{
     1,
     parent_sum,
@@ -183,35 +182,41 @@ TEST(EvaluateSplits, ScanValueOp) {
   EvaluateSplitInputs<GradStats> left = thrust::get<0>(split_inputs);
   EvaluateSplitInputs<GradStats> right = thrust::get<1>(split_inputs);
 
-  auto map_to_left_right = [&left](uint64_t idx) {
-    const auto left_hist_size = static_cast<uint64_t>(left.gradient_histogram.size());
+  auto map_to_hist_bin = [&left](uint32_t idx) {
+    const auto left_hist_size = static_cast<uint32_t>(left.gradient_histogram.size());
     if (idx < left_hist_size) {
       // Left child node
-      return EvaluateSplitsHistEntry{ChildNodeIndicator::kLeftChild, idx};
+      return EvaluateSplitsHistEntry{0, idx};
     } else {
       // Right child node
-      return EvaluateSplitsHistEntry{ChildNodeIndicator::kRightChild, idx - left_hist_size};
+      return EvaluateSplitsHistEntry{1, idx - left_hist_size};
     }
   };
 
-  std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
-  auto for_count_iter = thrust::make_counting_iterator<uint64_t>(0);
-  auto for_loc_iter = thrust::make_transform_iterator(for_count_iter, map_to_left_right);
-  auto rev_count_iter = thrust::make_reverse_iterator(
-      thrust::make_counting_iterator<uint64_t>(0) + static_cast<std::ptrdiff_t>(size));
-  auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
-  auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
-
   SplitEvaluator<TrainingParam> evaluator;
-  auto scan_input_iter = thrust::make_transform_iterator(
-      zip_loc_iter, ScanValueOp<GradStats>{left, right, evaluator});
+  std::size_t size = left.gradient_histogram.size() + right.gradient_histogram.size();
+  auto forward_count_iter = thrust::make_counting_iterator<uint32_t>(0);
+  auto forward_bin_iter = thrust::make_transform_iterator(forward_count_iter, map_to_hist_bin);
+  auto forward_scan_input_iter = thrust::make_transform_iterator(
+      forward_bin_iter, ScanValueOp<GradStats>{true, left, right, evaluator});
+
   for (std::size_t i = 0; i < size; ++i) {
-    auto fw = thrust::get<0>(*scan_input_iter);
-    auto bw = thrust::get<1>(*scan_input_iter);
     if (g_verbose_flag) {
-      std::cout << "forward: " << fw << std::endl << "backward: " << bw << std::endl;
+      std::cout << "forward: " << (*forward_scan_input_iter) << std::endl;
     }
-    ++scan_input_iter;
+    ++forward_scan_input_iter;
+  }
+
+  auto backward_count_iter = thrust::make_reverse_iterator(
+      thrust::make_counting_iterator<uint32_t>(0) + static_cast<std::ptrdiff_t>(size));
+  auto backward_bin_iter = thrust::make_transform_iterator(backward_count_iter, map_to_hist_bin);
+  auto backward_scan_input_iter = thrust::make_transform_iterator(
+      backward_bin_iter, ScanValueOp<GradStats>{false, left, right, evaluator});
+  for (std::size_t i = 0; i < size; ++i) {
+    if (g_verbose_flag) {
+      std::cout << "backward: " << (*backward_scan_input_iter) << std::endl;
+    }
+    ++backward_scan_input_iter;
   }
 }
 
@@ -234,49 +239,49 @@ TEST(EvaluateSplits, EvaluateSplitsInclusiveScan) {
   EXPECT_EQ(out_scan[0].best_findex, 0);
   if (out_scan[0].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[0].best_fvalue, 1.0f);
+    EXPECT_FLOAT_EQ(out_scan[0].best_partial_sum.sum_grad, -0.5);
+    EXPECT_FLOAT_EQ(out_scan[0].best_partial_sum.sum_hess, 0.5);
   } else {
     EXPECT_EQ(out_scan[0].best_fvalue, 2.0f);
+    EXPECT_FLOAT_EQ(out_scan[0].best_partial_sum.sum_grad, 0.5);
+    EXPECT_FLOAT_EQ(out_scan[0].best_partial_sum.sum_hess, 0.5);
   }
-  EXPECT_FLOAT_EQ(out_scan[0].best_left_sum.sum_grad, -0.5);
-  EXPECT_FLOAT_EQ(out_scan[0].best_left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[0].best_right_sum.sum_grad, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[0].best_right_sum.sum_hess, 0.5);
 
   EXPECT_FLOAT_EQ(out_scan[1].best_loss_chg, 4.0f);
   EXPECT_EQ(out_scan[1].best_findex, 1);
-  EXPECT_FLOAT_EQ(out_scan[1].best_left_sum.sum_grad, -1.0);
-  EXPECT_FLOAT_EQ(out_scan[1].best_left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[1].best_right_sum.sum_grad, 1.0);
-  EXPECT_FLOAT_EQ(out_scan[1].best_right_sum.sum_hess, 0.5);
   if (out_scan[1].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[1].best_fvalue, 11.0f);
+    EXPECT_FLOAT_EQ(out_scan[1].best_partial_sum.sum_grad, -1.0);
+    EXPECT_FLOAT_EQ(out_scan[1].best_partial_sum.sum_hess, 0.5);
   } else {
     EXPECT_EQ(out_scan[1].best_fvalue, 12.0f);
+    EXPECT_FLOAT_EQ(out_scan[1].best_partial_sum.sum_grad, 1.0);
+    EXPECT_FLOAT_EQ(out_scan[1].best_partial_sum.sum_hess, 0.5);
   }
 
   // Right child
   EXPECT_FLOAT_EQ(out_scan[2].best_loss_chg, 4.0f);
   EXPECT_EQ(out_scan[2].best_findex, 0);
-  EXPECT_FLOAT_EQ(out_scan[2].best_left_sum.sum_grad, -1.0);
-  EXPECT_FLOAT_EQ(out_scan[2].best_left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[2].best_right_sum.sum_grad, 1.0);
-  EXPECT_FLOAT_EQ(out_scan[2].best_right_sum.sum_hess, 0.5);
   if (out_scan[2].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[2].best_fvalue, 1.0f);
+    EXPECT_FLOAT_EQ(out_scan[2].best_partial_sum.sum_grad, -1.0);
+    EXPECT_FLOAT_EQ(out_scan[2].best_partial_sum.sum_hess, 0.5);
   } else {
     EXPECT_EQ(out_scan[2].best_fvalue, 2.0f);
+    EXPECT_FLOAT_EQ(out_scan[2].best_partial_sum.sum_grad, 1.0);
+    EXPECT_FLOAT_EQ(out_scan[2].best_partial_sum.sum_hess, 0.5);
   }
 
   EXPECT_FLOAT_EQ(out_scan[3].best_loss_chg, 1.0f);
   EXPECT_EQ(out_scan[3].best_findex, 1);
-  EXPECT_FLOAT_EQ(out_scan[3].best_left_sum.sum_grad, -0.5);
-  EXPECT_FLOAT_EQ(out_scan[3].best_left_sum.sum_hess, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[3].best_right_sum.sum_grad, 0.5);
-  EXPECT_FLOAT_EQ(out_scan[3].best_right_sum.sum_hess, 0.5);
   if (out_scan[3].best_direction == DefaultDirection::kRightDir) {
     EXPECT_EQ(out_scan[3].best_fvalue, 11.0f);
+    EXPECT_FLOAT_EQ(out_scan[3].best_partial_sum.sum_grad, -0.5);
+    EXPECT_FLOAT_EQ(out_scan[3].best_partial_sum.sum_hess, 0.5);
   } else {
     EXPECT_EQ(out_scan[3].best_fvalue, 12.0f);
+    EXPECT_FLOAT_EQ(out_scan[3].best_partial_sum.sum_grad, 0.5);
+    EXPECT_FLOAT_EQ(out_scan[3].best_partial_sum.sum_hess, 0.5);
   }
 }
 
