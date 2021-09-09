@@ -126,7 +126,8 @@ void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
   std::vector<GradStats> feature_histogram{{-0.5, 0.5}, {0.5, 0.5}};
   // The sum of gradient for the data points that lack a value for Feature 0 is (1.0, 0.5)
 
-  std::vector<FeatureType> feature_types(feature_set.size(), FeatureType::kCategorical);
+  std::vector<FeatureType> feature_types(feature_set.size(),
+                                         FeatureType::kCategorical);
   EvaluateSplitInputs<GradStats> input{
     1,
     parent_sum,
@@ -201,11 +202,9 @@ TEST(EvaluateSplits, ScanValueOp) {
   auto rev_loc_iter = thrust::make_transform_iterator(rev_count_iter, map_to_left_right);
   auto zip_loc_iter = thrust::make_zip_iterator(thrust::make_tuple(for_loc_iter, rev_loc_iter));
 
-  std::vector<ScanComputedElem<GradStats>> scratch_area(size * 2);
   SplitEvaluator<TrainingParam> evaluator;
   auto scan_input_iter = thrust::make_transform_iterator(
-      zip_loc_iter,
-      ScanValueOp<GradStats>{left, right, evaluator, ToSpan(scratch_area)});
+      zip_loc_iter, ScanValueOp<GradStats>{left, right, evaluator});
   for (std::size_t i = 0; i < size; ++i) {
     auto fw = thrust::get<0>(*scan_input_iter);
     auto bw = thrust::get<1>(*scan_input_iter);
