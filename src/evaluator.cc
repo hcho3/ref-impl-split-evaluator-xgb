@@ -261,34 +261,6 @@ ReduceValueOp<GradientSumT>::operator() (ScanElem<GradientSumT> e) {
   return DoIt(e);
 }
 
-/*template <typename GradientSumT>
-bool
-ReduceElem<GradientSumT>::Update(
-    GradientSumT partial_sum_in,
-    GradientSumT parent_sum_in,
-    float loss_chg_in,
-    int32_t findex_in,
-    uint32_t node_idx_in,
-    float fvalue_in,
-    bool is_cat_in,
-    DefaultDirection dir_in,
-    const TrainingParam& param) {
-  if (loss_chg_in > loss_chg &&
-      partial_sum_in.sum_hess >= param.min_child_weight &&
-      (parent_sum_in.sum_hess - partial_sum_in.sum_hess) >= param.min_child_weight) {
-    partial_sum = partial_sum_in;
-    parent_sum = parent_sum_in;
-    loss_chg = loss_chg_in;
-    findex = findex_in;
-    node_idx = node_idx_in;
-    fvalue = fvalue_in;
-    is_cat = is_cat_in;
-    direction = dir_in;
-    return true;
-  }
-  return false;
-}*/
-
 bool
 SplitCandidate::Update(const SplitCandidate& other, const TrainingParam& param) {
   if (other.loss_chg > loss_chg &&
