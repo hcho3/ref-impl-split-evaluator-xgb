@@ -107,11 +107,7 @@ void TestEvaluateSingleSplit(bool is_categorical) {
 
   SplitCandidate result = out_splits[0];
   EXPECT_EQ(result.findex, 1);
-  if (result.dir == DefaultDirection::kRightDir) {
-    EXPECT_EQ(result.fvalue, 11.0);
-  } else {
-    EXPECT_EQ(result.fvalue, 12.0);
-  }
+  EXPECT_EQ(result.fvalue, 11.0);
 }
 
 void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
@@ -204,11 +200,7 @@ TEST(EvaluateSplits, E2ETreeStump) {
   SplitCandidate result_right = out_splits[1];
   EXPECT_EQ(result_right.findex, 0);
   EXPECT_FLOAT_EQ(result_right.loss_chg, 4.0f);
-  if (result_right.dir == DefaultDirection::kRightDir) {
-    EXPECT_EQ(result_right.fvalue, 1.0f);
-  } else {
-    EXPECT_EQ(result_right.fvalue, 2.0f);
-  }
+  EXPECT_EQ(result_right.fvalue, 1.0f);
 }
 
 TEST(EvaluateSplits, EvaluateSingleSplit) {
@@ -282,11 +274,7 @@ TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
   EvaluateSplits(ToSpan(out_splits), evaluator, left, right);
 
   EXPECT_EQ(out_splits[0].findex, 2);
-  if (out_splits[0].dir == DefaultDirection::kRightDir) {
-    EXPECT_EQ(out_splits[0].fvalue, 100.0f);
-  } else {
-    EXPECT_EQ(out_splits[0].fvalue, 200.0f);
-  }
+  EXPECT_EQ(out_splits[0].fvalue, 100.0f);
   EXPECT_FLOAT_EQ(out_splits[0].loss_chg, 4.0f);
   EXPECT_FLOAT_EQ(out_splits[0].left_sum.sum_grad, -1.0);
   EXPECT_FLOAT_EQ(out_splits[0].left_sum.sum_hess, 0.5);
@@ -294,11 +282,7 @@ TEST(EvaluateSplits, EvaluateSplitsWithFeatureSampling) {
   EXPECT_FLOAT_EQ(out_splits[0].right_sum.sum_hess, 0.5);
 
   EXPECT_EQ(out_splits[1].findex, 1);
-  if (out_splits[1].dir == DefaultDirection::kRightDir) {
-    EXPECT_EQ(out_splits[1].fvalue, 11.0f);
-  } else {
-    EXPECT_EQ(out_splits[1].fvalue, 12.0f);
-  }
+  EXPECT_EQ(out_splits[1].fvalue, 11.0f);
   EXPECT_FLOAT_EQ(out_splits[1].loss_chg, 1.0f);
   EXPECT_FLOAT_EQ(out_splits[1].left_sum.sum_grad, -0.5);
   EXPECT_FLOAT_EQ(out_splits[1].left_sum.sum_hess, 0.5);
@@ -378,5 +362,5 @@ TEST(EvaluateSplits, E2ETreeStumpSecondExample) {
 
   SplitCandidate result = out_splits[0];
   EXPECT_EQ(result.findex, 7);
-  EXPECT_FLOAT_EQ(result.fvalue, 0.71f);
+  EXPECT_FLOAT_EQ(result.fvalue, 0.26f);
 }
