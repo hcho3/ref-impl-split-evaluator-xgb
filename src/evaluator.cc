@@ -69,8 +69,26 @@ void EvaluateSplits(std::span<SplitCandidate> out_splits,
       reduce_key, reduce_key + static_cast<std::ptrdiff_t>(out_scan.size()), reduce_val,
       thrust::make_discard_iterator(), out_reduce.begin(),
       [](int a, int b) { return (a == b); },
-      [=](SplitCandidate l, SplitCandidate r) {
-        l.Update(r, left.param);
+      [param=left.param](SplitCandidate l, SplitCandidate r) {
+        if (l.loss_chg == r.loss_chg
+            && l.left_sum.sum_hess >= param.min_child_weight
+            && l.right_sum.sum_hess >= param.min_child_weight
+            && r.left_sum.sum_hess >= param.min_child_weight
+            && r.right_sum.sum_hess >= param.min_child_weight) {
+          // tie-breaking logic
+          // 1. Favor lower feature ID
+          if (l.findex != r.findex) {
+            return (l.findex < r.findex) ? l : r;
+          }
+          // 2. If using same feature ID, favor kLeftDir direction
+          if (l.dir == DefaultDirection::kLeftDir) {
+            return l;
+          }
+          if (r.dir == DefaultDirection::kLeftDir) {
+            return r;
+          }
+        }
+        l.Update(r, param);
         return l;
       });
   if (right.gradient_histogram.empty()) {
