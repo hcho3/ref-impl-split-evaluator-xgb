@@ -106,7 +106,6 @@ struct ScanOp {
 
   using ScanElemT = ScanElem<GradientSumT>;
 
-  ScanElemT DoIt(ScanElemT lhs, ScanElemT rhs);
   ScanElemT operator() (ScanElemT lhs, ScanElemT rhs);
 };
 
@@ -133,7 +132,6 @@ struct ReduceValueOp {
   using ScanElemT = ScanElem<GradientSumT>;
   using ReduceElemT = ReduceElem<GradientSumT>;
 
-  ReduceElemT DoIt(ScanElemT e);
   ReduceElemT operator() (ScanElemT e);
 };
 

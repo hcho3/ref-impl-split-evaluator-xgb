@@ -210,7 +210,7 @@ ScanValueOp<GradientSumT>::operator() (EvaluateSplitsHistEntry entry) {
 
 template <typename GradientSumT>
 ScanElem<GradientSumT>
-ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs) {
+ScanOp<GradientSumT>::operator() (ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs) {
   ScanElem<GradientSumT> ret;
   if (lhs.findex != rhs.findex || lhs.node_idx != rhs.node_idx || lhs.forward != rhs.forward) {
     // Segmented Scan
@@ -234,14 +234,8 @@ ScanOp<GradientSumT>::DoIt(ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rh
 }
 
 template <typename GradientSumT>
-ScanElem<GradientSumT>
-ScanOp<GradientSumT>::operator() (ScanElem<GradientSumT> lhs, ScanElem<GradientSumT> rhs) {
-  return DoIt(lhs, rhs);
-};
-
-template <typename GradientSumT>
 ReduceElem<GradientSumT>
-ReduceValueOp<GradientSumT>::DoIt(ScanElem<GradientSumT> e) {
+ReduceValueOp<GradientSumT>::operator() (ScanElem<GradientSumT> e) {
   ReduceElem<GradientSumT> ret;
   if (e.is_cat) {
     ret.partial_sum = e.gpair;
@@ -274,12 +268,6 @@ ReduceValueOp<GradientSumT>::DoIt(ScanElem<GradientSumT> e) {
   ret.is_cat = e.is_cat;
   ret.direction = (e.forward ? DefaultDirection::kRightDir : DefaultDirection::kLeftDir);
   return ret;
-}
-
-template <typename GradientSumT>
-ReduceElem<GradientSumT>
-ReduceValueOp<GradientSumT>::operator() (ScanElem<GradientSumT> e) {
-  return DoIt(e);
 }
 
 bool
