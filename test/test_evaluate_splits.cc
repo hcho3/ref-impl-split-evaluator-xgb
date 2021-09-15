@@ -107,7 +107,11 @@ void TestEvaluateSingleSplit(bool is_categorical) {
 
   SplitCandidate result = out_splits[0];
   EXPECT_EQ(result.findex, 1);
-  EXPECT_EQ(result.fvalue, 11.0);
+  if (is_categorical) {
+    EXPECT_EQ(result.fvalue, 12.0);
+  } else {
+    EXPECT_EQ(result.fvalue, 11.0);
+  }
 }
 
 void TestEvaluateSingleSplitWithMissing(bool is_categorical) {
